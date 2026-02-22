@@ -1,6 +1,6 @@
 module forge.lthn.ai/core/go-git
 
-go 1.25.7
+go 1.26.0
 
 require (
 	forge.lthn.ai/core/go v0.0.1
