@@ -3,7 +3,7 @@ module forge.lthn.ai/core/go-git
 go 1.25.7
 
 require (
-	forge.lthn.ai/core/go v0.0.0-20260221021314-d7e521561806
+	forge.lthn.ai/core/go main
 	github.com/stretchr/testify v1.11.1
 )
 
