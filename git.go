@@ -92,7 +92,7 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	}
 
 	// Parse status output
-	for _, line := range strings.Split(porcelain, "\n") {
+	for line := range strings.SplitSeq(porcelain, "\n") {
 		if len(line) < 2 {
 			continue
 		}
