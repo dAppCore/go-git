@@ -2,6 +2,8 @@ package git
 
 import (
 	"context"
+	"iter"
+	"slices"
 
 	"forge.lthn.ai/core/go/pkg/framework"
 )
@@ -103,24 +105,43 @@ func (s *Service) handleTask(c *framework.Core, t framework.Task) (any, bool, er
 // Status returns last status result.
 func (s *Service) Status() []RepoStatus { return s.lastStatus }
 
-// DirtyRepos returns repos with uncommitted changes.
-func (s *Service) DirtyRepos() []RepoStatus {
-	var dirty []RepoStatus
-	for _, st := range s.lastStatus {
-		if st.Error == nil && st.IsDirty() {
-			dirty = append(dirty, st)
+// All returns an iterator over all last known statuses.
+func (s *Service) All() iter.Seq[RepoStatus] {
+	return slices.Values(s.lastStatus)
+}
+
+// Dirty returns an iterator over repos with uncommitted changes.
+func (s *Service) Dirty() iter.Seq[RepoStatus] {
+	return func(yield func(RepoStatus) bool) {
+		for _, st := range s.lastStatus {
+			if st.Error == nil && st.IsDirty() {
+				if !yield(st) {
+					return
+				}
+			}
 		}
 	}
-	return dirty
+}
+
+// Ahead returns an iterator over repos with unpushed commits.
+func (s *Service) Ahead() iter.Seq[RepoStatus] {
+	return func(yield func(RepoStatus) bool) {
+		for _, st := range s.lastStatus {
+			if st.Error == nil && st.HasUnpushed() {
+				if !yield(st) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// DirtyRepos returns repos with uncommitted changes.
+func (s *Service) DirtyRepos() []RepoStatus {
+	return slices.Collect(s.Dirty())
 }
 
 // AheadRepos returns repos with unpushed commits.
 func (s *Service) AheadRepos() []RepoStatus {
-	var ahead []RepoStatus
-	for _, st := range s.lastStatus {
-		if st.Error == nil && st.HasUnpushed() {
-			ahead = append(ahead, st)
-		}
-	}
-	return ahead
+	return slices.Collect(s.Ahead())
 }

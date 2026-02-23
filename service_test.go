@@ -1,6 +1,7 @@
 package git
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,10 +24,13 @@ func TestService_DirtyRepos_Good(t *testing.T) {
 	dirty := s.DirtyRepos()
 	assert.Len(t, dirty, 3)
 
-	names := make([]string, len(dirty))
-	for i, d := range dirty {
-		names[i] = d.Name
-	}
+	names := slices.Collect(func(yield func(string) bool) {
+		for _, d := range dirty {
+			if !yield(d.Name) {
+				return
+			}
+		}
+	})
 	assert.Contains(t, names, "dirty-modified")
 	assert.Contains(t, names, "dirty-untracked")
 	assert.Contains(t, names, "dirty-staged")
@@ -64,10 +68,13 @@ func TestService_AheadRepos_Good(t *testing.T) {
 	ahead := s.AheadRepos()
 	assert.Len(t, ahead, 2)
 
-	names := make([]string, len(ahead))
-	for i, a := range ahead {
-		names[i] = a.Name
-	}
+	names := slices.Collect(func(yield func(string) bool) {
+		for _, a := range ahead {
+			if !yield(a.Name) {
+				return
+			}
+		}
+	})
 	assert.Contains(t, names, "ahead-by-one")
 	assert.Contains(t, names, "ahead-by-five")
 }
@@ -88,6 +95,30 @@ func TestService_AheadRepos_Good_EmptyStatus(t *testing.T) {
 	s := &Service{}
 	ahead := s.AheadRepos()
 	assert.Empty(t, ahead)
+}
+
+func TestService_Iterators_Good(t *testing.T) {
+	s := &Service{
+		lastStatus: []RepoStatus{
+			{Name: "clean"},
+			{Name: "dirty", Modified: 1},
+			{Name: "ahead", Ahead: 2},
+		},
+	}
+
+	// Test All()
+	all := slices.Collect(s.All())
+	assert.Len(t, all, 3)
+
+	// Test Dirty()
+	dirty := slices.Collect(s.Dirty())
+	assert.Len(t, dirty, 1)
+	assert.Equal(t, "dirty", dirty[0].Name)
+
+	// Test Ahead()
+	ahead := slices.Collect(s.Ahead())
+	assert.Len(t, ahead, 1)
+	assert.Equal(t, "ahead", ahead[0].Name)
 }
 
 func TestService_Status_Good(t *testing.T) {

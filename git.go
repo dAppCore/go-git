@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -105,12 +106,12 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 		}
 
 		// Staged (index has changes)
-		if x == 'A' || x == 'D' || x == 'R' || x == 'M' {
+		if slices.Contains([]byte{'A', 'D', 'R', 'M'}, x) {
 			status.Staged++
 		}
 
 		// Modified in working tree
-		if y == 'M' || y == 'D' {
+		if slices.Contains([]byte{'M', 'D'}, y) {
 			status.Modified++
 		}
 	}
