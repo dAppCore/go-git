@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"forge.lthn.ai/core/go/pkg/framework"
+	"forge.lthn.ai/core/go/pkg/core"
 )
 
 func TestNewService_Good(t *testing.T) {
@@ -19,7 +19,7 @@ func TestNewService_Good(t *testing.T) {
 	assert.NotNil(t, factory)
 
 	// Create a minimal Core to test the factory.
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc, err := factory(c)
@@ -32,12 +32,12 @@ func TestNewService_Good(t *testing.T) {
 }
 
 func TestService_OnStartup_Good(t *testing.T) {
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	opts := ServiceOptions{WorkDir: "/tmp"}
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, opts),
+		ServiceRuntime: core.NewServiceRuntime(c, opts),
 	}
 
 	err = svc.OnStartup(context.Background())
@@ -47,11 +47,11 @@ func TestService_OnStartup_Good(t *testing.T) {
 func TestService_HandleQuery_Good_Status(t *testing.T) {
 	dir := initTestRepo(t)
 
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
 	// Call handleQuery directly.
@@ -73,11 +73,11 @@ func TestService_HandleQuery_Good_Status(t *testing.T) {
 }
 
 func TestService_HandleQuery_Good_DirtyRepos(t *testing.T) {
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 		lastStatus: []RepoStatus{
 			{Name: "clean"},
 			{Name: "dirty", Modified: 1},
@@ -95,11 +95,11 @@ func TestService_HandleQuery_Good_DirtyRepos(t *testing.T) {
 }
 
 func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 		lastStatus: []RepoStatus{
 			{Name: "synced"},
 			{Name: "ahead", Ahead: 3},
@@ -117,11 +117,11 @@ func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
 }
 
 func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
 	result, handled, err := svc.handleQuery(c, "unknown query type")
@@ -133,11 +133,11 @@ func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
 func TestService_HandleTask_Good_Push(t *testing.T) {
 	dir := initTestRepo(t)
 
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
 	// Push without a remote will fail, but handleTask should still handle it.
@@ -149,11 +149,11 @@ func TestService_HandleTask_Good_Push(t *testing.T) {
 func TestService_HandleTask_Good_Pull(t *testing.T) {
 	dir := initTestRepo(t)
 
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
 	_, handled, err := svc.handleTask(c, TaskPull{Path: dir, Name: "test"})
@@ -164,11 +164,11 @@ func TestService_HandleTask_Good_Pull(t *testing.T) {
 func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	dir := initTestRepo(t)
 
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
 	result, handled, err := svc.handleTask(c, TaskPushMultiple{
@@ -186,11 +186,11 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 }
 
 func TestService_HandleTask_Good_UnknownTask(t *testing.T) {
-	c, err := framework.New()
+	c, err := core.New()
 	require.NoError(t, err)
 
 	svc := &Service{
-		ServiceRuntime: framework.NewServiceRuntime(c, ServiceOptions{}),
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
 	result, handled, err := svc.handleTask(c, "unknown task")

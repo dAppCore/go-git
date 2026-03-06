@@ -5,7 +5,7 @@ import (
 	"iter"
 	"slices"
 
-	"forge.lthn.ai/core/go/pkg/framework"
+	"forge.lthn.ai/core/go/pkg/core"
 )
 
 // Queries for git service
@@ -49,15 +49,15 @@ type ServiceOptions struct {
 
 // Service provides git operations as a Core service.
 type Service struct {
-	*framework.ServiceRuntime[ServiceOptions]
+	*core.ServiceRuntime[ServiceOptions]
 	lastStatus []RepoStatus
 }
 
 // NewService creates a git service factory.
-func NewService(opts ServiceOptions) func(*framework.Core) (any, error) {
-	return func(c *framework.Core) (any, error) {
+func NewService(opts ServiceOptions) func(*core.Core) (any, error) {
+	return func(c *core.Core) (any, error) {
 		return &Service{
-			ServiceRuntime: framework.NewServiceRuntime(c, opts),
+			ServiceRuntime: core.NewServiceRuntime(c, opts),
 		}, nil
 	}
 }
@@ -69,7 +69,7 @@ func (s *Service) OnStartup(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) handleQuery(c *framework.Core, q framework.Query) (any, bool, error) {
+func (s *Service) handleQuery(c *core.Core, q core.Query) (any, bool, error) {
 	switch m := q.(type) {
 	case QueryStatus:
 		statuses := Status(context.Background(), StatusOptions(m))
@@ -85,7 +85,7 @@ func (s *Service) handleQuery(c *framework.Core, q framework.Query) (any, bool, 
 	return nil, false, nil
 }
 
-func (s *Service) handleTask(c *framework.Core, t framework.Task) (any, bool, error) {
+func (s *Service) handleTask(c *core.Core, t core.Task) (any, bool, error) {
 	switch m := t.(type) {
 	case TaskPush:
 		err := Push(context.Background(), m.Path)
