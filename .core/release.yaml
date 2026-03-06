@@ -1,0 +1,20 @@
+version: 1
+
+project:
+  name: go-git
+  repository: core/go-git
+
+publishers: []
+
+changelog:
+  include:
+    - feat
+    - fix
+    - perf
+    - refactor
+  exclude:
+    - chore
+    - docs
+    - style
+    - test
+    - ci
