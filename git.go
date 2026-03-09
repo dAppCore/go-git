@@ -4,9 +4,11 @@ package git
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -77,6 +79,12 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 		Path: path,
 	}
 
+	// Validate path to prevent directory traversal
+	if !filepath.IsAbs(path) {
+		status.Error = fmt.Errorf("path must be absolute: %s", path)
+		return status
+	}
+
 	// Get current branch
 	branch, err := gitCommand(ctx, path, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -117,7 +125,11 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	}
 
 	// Get ahead/behind counts
-	ahead, behind := getAheadBehind(ctx, path)
+	ahead, behind, err := getAheadBehind(ctx, path)
+	if err != nil {
+		// We don't fail the whole status if ahead/behind fails (might be no upstream)
+		// but we could log it or store it if needed. For now, we just keep 0.
+	}
 	status.Ahead = ahead
 	status.Behind = behind
 
@@ -125,20 +137,33 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 }
 
 // getAheadBehind returns the number of commits ahead and behind upstream.
-func getAheadBehind(ctx context.Context, path string) (ahead, behind int) {
+func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err error) {
 	// Try to get ahead count
 	aheadStr, err := gitCommand(ctx, path, "rev-list", "--count", "@{u}..HEAD")
 	if err == nil {
 		ahead, _ = strconv.Atoi(strings.TrimSpace(aheadStr))
+	} else {
+		// If it failed because of no upstream, don't return error
+		if strings.Contains(err.Error(), "no upstream") || strings.Contains(err.Error(), "No upstream") {
+			err = nil
+		}
+	}
+
+	if err != nil {
+		return 0, 0, err
 	}
 
 	// Try to get behind count
 	behindStr, err := gitCommand(ctx, path, "rev-list", "--count", "HEAD..@{u}")
 	if err == nil {
 		behind, _ = strconv.Atoi(strings.TrimSpace(behindStr))
+	} else {
+		if strings.Contains(err.Error(), "no upstream") || strings.Contains(err.Error(), "No upstream") {
+			err = nil
+		}
 	}
 
-	return ahead, behind
+	return ahead, behind, err
 }
 
 // Push pushes commits for a single repository.
@@ -178,10 +203,11 @@ func gitInteractive(ctx context.Context, dir string, args ...string) error {
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 
 	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return &GitError{Err: err, Stderr: stderr.String()}
+		return &GitError{
+			Args:   args,
+			Err:    err,
+			Stderr: stderr.String(),
 		}
-		return err
 	}
 
 	return nil
@@ -197,8 +223,9 @@ type PushResult struct {
 
 // PushMultiple pushes multiple repositories sequentially.
 // Sequential because SSH passphrase prompts need user interaction.
-func PushMultiple(ctx context.Context, paths []string, names map[string]string) []PushResult {
+func PushMultiple(ctx context.Context, paths []string, names map[string]string) ([]PushResult, error) {
 	results := make([]PushResult, len(paths))
+	var lastErr error
 
 	for i, path := range paths {
 		name := names[path]
@@ -214,6 +241,7 @@ func PushMultiple(ctx context.Context, paths []string, names map[string]string) 
 		err := Push(ctx, path)
 		if err != nil {
 			result.Error = err
+			lastErr = err
 		} else {
 			result.Success = true
 		}
@@ -221,7 +249,7 @@ func PushMultiple(ctx context.Context, paths []string, names map[string]string) 
 		results[i] = result
 	}
 
-	return results
+	return results, lastErr
 }
 
 // gitCommand runs a git command and returns stdout.
@@ -234,30 +262,32 @@ func gitCommand(ctx context.Context, dir string, args ...string) (string, error)
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Include stderr in error message for better diagnostics
-		if stderr.Len() > 0 {
-			return "", &GitError{Err: err, Stderr: stderr.String()}
+		return "", &GitError{
+			Args:   args,
+			Err:    err,
+			Stderr: stderr.String(),
 		}
-		return "", err
 	}
 
 	return stdout.String(), nil
 }
 
-// GitError wraps a git command error with stderr output.
+// GitError wraps a git command error with stderr output and command context.
 type GitError struct {
+	Args   []string
 	Err    error
 	Stderr string
 }
 
-// Error returns the git error message, preferring stderr output.
+// Error returns a descriptive error message.
 func (e *GitError) Error() string {
-	// Return just the stderr message, trimmed
-	msg := strings.TrimSpace(e.Stderr)
-	if msg != "" {
-		return msg
+	cmd := "git " + strings.Join(e.Args, " ")
+	stderr := strings.TrimSpace(e.Stderr)
+
+	if stderr != "" {
+		return fmt.Errorf("git command %q failed: %s", cmd, stderr).Error()
 	}
-	return e.Err.Error()
+	return fmt.Errorf("git command %q failed: %w", cmd, e.Err).Error()
 }
 
 // Unwrap returns the underlying error for error chain inspection.

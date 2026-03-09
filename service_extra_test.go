@@ -14,7 +14,7 @@ import (
 )
 
 func TestNewService_Good(t *testing.T) {
-	opts := ServiceOptions{WorkDir: "/tmp/test"}
+	opts := ServiceOptions{WorkDir: t.TempDir()}
 	factory := NewService(opts)
 	assert.NotNil(t, factory)
 
@@ -35,9 +35,10 @@ func TestService_OnStartup_Good(t *testing.T) {
 	c, err := core.New()
 	require.NoError(t, err)
 
-	opts := ServiceOptions{WorkDir: "/tmp"}
+	opts := ServiceOptions{WorkDir: t.TempDir()}
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, opts),
+		opts:           opts,
 	}
 
 	err = svc.OnStartup(context.Background())
@@ -45,7 +46,7 @@ func TestService_OnStartup_Good(t *testing.T) {
 }
 
 func TestService_HandleQuery_Good_Status(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c, err := core.New()
 	require.NoError(t, err)
@@ -131,7 +132,7 @@ func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
 }
 
 func TestService_HandleTask_Good_Push(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c, err := core.New()
 	require.NoError(t, err)
@@ -147,7 +148,7 @@ func TestService_HandleTask_Good_Push(t *testing.T) {
 }
 
 func TestService_HandleTask_Good_Pull(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c, err := core.New()
 	require.NoError(t, err)
@@ -162,7 +163,7 @@ func TestService_HandleTask_Good_Pull(t *testing.T) {
 }
 
 func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c, err := core.New()
 	require.NoError(t, err)
@@ -177,7 +178,7 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	})
 
 	assert.True(t, handled)
-	assert.NoError(t, err) // PushMultiple does not return errors directly
+	assert.Error(t, err) // PushMultiple returns errors directly
 
 	results, ok := result.([]PushResult)
 	require.True(t, ok)
@@ -203,7 +204,7 @@ func TestService_HandleTask_Good_UnknownTask(t *testing.T) {
 
 func TestGetStatus_Good_AheadBehindNoUpstream(t *testing.T) {
 	// A repo without a tracking branch should return 0 ahead/behind.
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	status := getStatus(context.Background(), dir, "no-upstream")
 	require.NoError(t, status.Error)
@@ -212,18 +213,20 @@ func TestGetStatus_Good_AheadBehindNoUpstream(t *testing.T) {
 }
 
 func TestPushMultiple_Good_Empty(t *testing.T) {
-	results := PushMultiple(context.Background(), []string{}, map[string]string{})
+	results, err := PushMultiple(context.Background(), []string{}, map[string]string{})
+	assert.NoError(t, err)
 	assert.Empty(t, results)
 }
 
 func TestPushMultiple_Good_MultiplePaths(t *testing.T) {
-	dir1 := initTestRepo(t)
-	dir2 := initTestRepo(t)
+	dir1, _ := filepath.Abs(initTestRepo(t))
+	dir2, _ := filepath.Abs(initTestRepo(t))
 
-	results := PushMultiple(context.Background(), []string{dir1, dir2}, map[string]string{
+	results, err := PushMultiple(context.Background(), []string{dir1, dir2}, map[string]string{
 		dir1: "repo-1",
 		dir2: "repo-2",
 	})
+	assert.Error(t, err)
 
 	require.Len(t, results, 2)
 	assert.Equal(t, "repo-1", results[0].Name)
@@ -235,8 +238,8 @@ func TestPushMultiple_Good_MultiplePaths(t *testing.T) {
 
 func TestPush_Good_WithRemote(t *testing.T) {
 	// Create a bare remote and a clone.
-	bareDir := t.TempDir()
-	cloneDir := t.TempDir()
+	bareDir, _ := filepath.Abs(t.TempDir())
+	cloneDir, _ := filepath.Abs(t.TempDir())
 
 	cmd := exec.Command("git", "init", "--bare")
 	cmd.Dir = bareDir
@@ -282,6 +285,8 @@ func TestPush_Good_WithRemote(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify ahead count is now 0.
-	ahead, _ := getAheadBehind(context.Background(), cloneDir)
+	ahead, behind, err := getAheadBehind(context.Background(), cloneDir)
+	assert.NoError(t, err)
 	assert.Equal(t, 0, ahead)
+	assert.Equal(t, 0, behind)
 }

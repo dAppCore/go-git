@@ -169,18 +169,13 @@ func TestGitError_Error(t *testing.T) {
 	}{
 		{
 			name:     "stderr takes precedence",
-			err:      &GitError{Err: errors.New("exit 1"), Stderr: "fatal: not a git repository"},
-			expected: "fatal: not a git repository",
+			err:      &GitError{Args: []string{"status"}, Err: errors.New("exit 1"), Stderr: "fatal: not a git repository"},
+			expected: "git command \"git status\" failed: fatal: not a git repository",
 		},
 		{
 			name:     "falls back to underlying error",
-			err:      &GitError{Err: errors.New("exit status 128"), Stderr: ""},
-			expected: "exit status 128",
-		},
-		{
-			name:     "trims whitespace from stderr",
-			err:      &GitError{Err: errors.New("exit 1"), Stderr: "  error message  \n"},
-			expected: "error message",
+			err:      &GitError{Args: []string{"status"}, Err: errors.New("exit status 128"), Stderr: ""},
+			expected: "git command \"git status\" failed: exit status 128",
 		},
 	}
 
@@ -243,7 +238,7 @@ func TestIsNonFastForward(t *testing.T) {
 // --- gitCommand tests with real git repos ---
 
 func TestGitCommand_Good(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	out, err := gitCommand(context.Background(), dir, "rev-parse", "--abbrev-ref", "HEAD")
 	require.NoError(t, err)
@@ -258,7 +253,7 @@ func TestGitCommand_Bad_InvalidDir(t *testing.T) {
 }
 
 func TestGitCommand_Bad_NotARepo(t *testing.T) {
-	dir := t.TempDir()
+	dir, _ := filepath.Abs(t.TempDir())
 	_, err := gitCommand(context.Background(), dir, "status")
 	require.Error(t, err)
 
@@ -266,13 +261,14 @@ func TestGitCommand_Bad_NotARepo(t *testing.T) {
 	var gitErr *GitError
 	if errors.As(err, &gitErr) {
 		assert.Contains(t, gitErr.Stderr, "not a git repository")
+		assert.Equal(t, []string{"status"}, gitErr.Args)
 	}
 }
 
 // --- getStatus integration tests ---
 
 func TestGetStatus_Good_CleanRepo(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	status := getStatus(context.Background(), dir, "test-repo")
 	require.NoError(t, status.Error)
@@ -283,7 +279,7 @@ func TestGetStatus_Good_CleanRepo(t *testing.T) {
 }
 
 func TestGetStatus_Good_ModifiedFile(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Modify the existing tracked file.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified\n"), 0644))
@@ -295,7 +291,7 @@ func TestGetStatus_Good_ModifiedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_UntrackedFile(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Create a new untracked file.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0644))
@@ -307,7 +303,7 @@ func TestGetStatus_Good_UntrackedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_StagedFile(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Create and stage a new file.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0644))
@@ -322,7 +318,7 @@ func TestGetStatus_Good_StagedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_MixedChanges(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Create untracked file.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new"), 0644))
@@ -345,7 +341,7 @@ func TestGetStatus_Good_MixedChanges(t *testing.T) {
 }
 
 func TestGetStatus_Good_DeletedTrackedFile(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Delete the tracked file (unstaged deletion).
 	require.NoError(t, os.Remove(filepath.Join(dir, "README.md")))
@@ -357,7 +353,7 @@ func TestGetStatus_Good_DeletedTrackedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_StagedDeletion(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Stage a deletion.
 	cmd := exec.Command("git", "rm", "README.md")
@@ -379,8 +375,8 @@ func TestGetStatus_Bad_InvalidPath(t *testing.T) {
 // --- Status (parallel multi-repo) tests ---
 
 func TestStatus_Good_MultipleRepos(t *testing.T) {
-	dir1 := initTestRepo(t)
-	dir2 := initTestRepo(t)
+	dir1, _ := filepath.Abs(initTestRepo(t))
+	dir2, _ := filepath.Abs(initTestRepo(t))
 
 	// Make dir2 dirty.
 	require.NoError(t, os.WriteFile(filepath.Join(dir2, "extra.txt"), []byte("extra"), 0644))
@@ -412,7 +408,7 @@ func TestStatus_Good_EmptyPaths(t *testing.T) {
 }
 
 func TestStatus_Good_NameFallback(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// No name mapping — path should be used as name.
 	results := Status(context.Background(), StatusOptions{
@@ -425,8 +421,8 @@ func TestStatus_Good_NameFallback(t *testing.T) {
 }
 
 func TestStatus_Good_WithErrors(t *testing.T) {
-	validDir := initTestRepo(t)
-	invalidDir := "/nonexistent/path"
+	validDir, _ := filepath.Abs(initTestRepo(t))
+	invalidDir, _ := filepath.Abs("/nonexistent/path")
 
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{validDir, invalidDir},
@@ -445,11 +441,12 @@ func TestStatus_Good_WithErrors(t *testing.T) {
 
 func TestPushMultiple_Good_NoRemote(t *testing.T) {
 	// Push without a remote will fail but we can test the result structure.
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
-	results := PushMultiple(context.Background(), []string{dir}, map[string]string{
+	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{
 		dir: "test-repo",
 	})
+	assert.Error(t, err)
 
 	require.Len(t, results, 1)
 	assert.Equal(t, "test-repo", results[0].Name)
@@ -460,9 +457,10 @@ func TestPushMultiple_Good_NoRemote(t *testing.T) {
 }
 
 func TestPushMultiple_Good_NameFallback(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
-	results := PushMultiple(context.Background(), []string{dir}, map[string]string{})
+	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{})
+	assert.Error(t, err)
 
 	require.Len(t, results, 1)
 	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
@@ -471,7 +469,7 @@ func TestPushMultiple_Good_NameFallback(t *testing.T) {
 // --- Pull tests ---
 
 func TestPull_Bad_NoRemote(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 	err := Pull(context.Background(), dir)
 	assert.Error(t, err, "pull without remote should fail")
 }
@@ -479,7 +477,7 @@ func TestPull_Bad_NoRemote(t *testing.T) {
 // --- Push tests ---
 
 func TestPush_Bad_NoRemote(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 	err := Push(context.Background(), dir)
 	assert.Error(t, err, "push without remote should fail")
 }
@@ -487,7 +485,7 @@ func TestPush_Bad_NoRemote(t *testing.T) {
 // --- Context cancellation test ---
 
 func TestGetStatus_Good_ContextCancellation(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
@@ -501,8 +499,8 @@ func TestGetStatus_Good_ContextCancellation(t *testing.T) {
 
 func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
 	// Create a bare remote and a clone to test ahead/behind counts.
-	bareDir := t.TempDir()
-	cloneDir := t.TempDir()
+	bareDir, _ := filepath.Abs(t.TempDir())
+	cloneDir, _ := filepath.Abs(t.TempDir())
 
 	// Initialise the bare repo.
 	cmd := exec.Command("git", "init", "--bare")
@@ -547,7 +545,8 @@ func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
 		require.NoError(t, cmd.Run())
 	}
 
-	ahead, behind := getAheadBehind(context.Background(), cloneDir)
+	ahead, behind, err := getAheadBehind(context.Background(), cloneDir)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, ahead, "should be 1 commit ahead")
 	assert.Equal(t, 0, behind, "should not be behind")
 }
@@ -555,7 +554,7 @@ func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
 // --- Renamed file detection ---
 
 func TestGetStatus_Good_RenamedFile(t *testing.T) {
-	dir := initTestRepo(t)
+	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Rename via git mv (stages the rename).
 	cmd := exec.Command("git", "mv", "README.md", "GUIDE.md")

@@ -2,8 +2,12 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"iter"
+	"path/filepath"
 	"slices"
+	"strings"
+	"sync"
 
 	"forge.lthn.ai/core/go/pkg/core"
 )
@@ -50,6 +54,8 @@ type ServiceOptions struct {
 // Service provides git operations as a Core service.
 type Service struct {
 	*core.ServiceRuntime[ServiceOptions]
+	opts       ServiceOptions
+	mu         sync.RWMutex
 	lastStatus []RepoStatus
 }
 
@@ -58,6 +64,7 @@ func NewService(opts ServiceOptions) func(*core.Core) (any, error) {
 	return func(c *core.Core) (any, error) {
 		return &Service{
 			ServiceRuntime: core.NewServiceRuntime(c, opts),
+			opts:           opts,
 		}, nil
 	}
 }
@@ -70,10 +77,23 @@ func (s *Service) OnStartup(ctx context.Context) error {
 }
 
 func (s *Service) handleQuery(c *core.Core, q core.Query) (any, bool, error) {
+	ctx := context.Background() // TODO: core should pass context to handlers
+
 	switch m := q.(type) {
 	case QueryStatus:
-		statuses := Status(context.Background(), StatusOptions(m))
+		// Validate all paths before execution
+		for _, path := range m.Paths {
+			if err := s.validatePath(path); err != nil {
+				return nil, true, err
+			}
+		}
+
+		statuses := Status(ctx, StatusOptions(m))
+
+		s.mu.Lock()
 		s.lastStatus = statuses
+		s.mu.Unlock()
+
 		return statuses, true, nil
 
 	case QueryDirtyRepos:
@@ -86,34 +106,72 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) (any, bool, error) {
 }
 
 func (s *Service) handleTask(c *core.Core, t core.Task) (any, bool, error) {
+	ctx := context.Background() // TODO: core should pass context to handlers
+
 	switch m := t.(type) {
 	case TaskPush:
-		err := Push(context.Background(), m.Path)
+		if err := s.validatePath(m.Path); err != nil {
+			return nil, true, err
+		}
+		err := Push(ctx, m.Path)
 		return nil, true, err
 
 	case TaskPull:
-		err := Pull(context.Background(), m.Path)
+		if err := s.validatePath(m.Path); err != nil {
+			return nil, true, err
+		}
+		err := Pull(ctx, m.Path)
 		return nil, true, err
 
 	case TaskPushMultiple:
-		results := PushMultiple(context.Background(), m.Paths, m.Names)
-		return results, true, nil
+		for _, path := range m.Paths {
+			if err := s.validatePath(path); err != nil {
+				return nil, true, err
+			}
+		}
+		results, err := PushMultiple(ctx, m.Paths, m.Names)
+		return results, true, err
 	}
 	return nil, false, nil
 }
 
+func (s *Service) validatePath(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("path must be absolute: %s", path)
+	}
+
+	workDir := s.opts.WorkDir
+	if workDir != "" {
+		rel, err := filepath.Rel(workDir, path)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("path %s is outside of allowed WorkDir %s", path, workDir)
+		}
+	}
+	return nil
+}
+
 // Status returns last status result.
-func (s *Service) Status() []RepoStatus { return s.lastStatus }
+func (s *Service) Status() []RepoStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.lastStatus)
+}
 
 // All returns an iterator over all last known statuses.
 func (s *Service) All() iter.Seq[RepoStatus] {
-	return slices.Values(s.lastStatus)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Values(slices.Clone(s.lastStatus))
 }
 
 // Dirty returns an iterator over repos with uncommitted changes.
 func (s *Service) Dirty() iter.Seq[RepoStatus] {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lastStatus := slices.Clone(s.lastStatus)
+
 	return func(yield func(RepoStatus) bool) {
-		for _, st := range s.lastStatus {
+		for _, st := range lastStatus {
 			if st.Error == nil && st.IsDirty() {
 				if !yield(st) {
 					return
@@ -125,8 +183,12 @@ func (s *Service) Dirty() iter.Seq[RepoStatus] {
 
 // Ahead returns an iterator over repos with unpushed commits.
 func (s *Service) Ahead() iter.Seq[RepoStatus] {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lastStatus := slices.Clone(s.lastStatus)
+
 	return func(yield func(RepoStatus) bool) {
-		for _, st := range s.lastStatus {
+		for _, st := range lastStatus {
 			if st.Error == nil && st.HasUnpushed() {
 				if !yield(st) {
 					return
