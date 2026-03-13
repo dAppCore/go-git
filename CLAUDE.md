@@ -1,55 +1,47 @@
-# CLAUDE.md — go-git
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Overview
 
 Multi-repository git operations library. Parallel status checks, sequential push/pull (for SSH passphrase prompts), error handling with stderr capture.
 
 **Module:** `forge.lthn.ai/core/go-git`
-**Extracted from:** `forge.lthn.ai/core/go-scm/git/`
-**Coverage:** 96.7%
+**Go:** 1.26+
 
 ## Build & Test
 
 ```bash
-go test ./... -v        # Run all tests
-go test -run TestName   # Run single test
+go test ./... -v           # Run all tests
+go test -run TestName      # Run single test
+golangci-lint run ./...    # Lint (see .golangci.yml for enabled linters)
 ```
 
 ## Architecture
 
 Two files:
-- `git.go` — Core operations: Status, Push, Pull, PushMultiple (no framework dependency)
-- `service.go` — Core framework integration: queries (QueryStatus, QueryDirtyRepos, QueryAheadRepos) and tasks (TaskPush, TaskPull, TaskPushMultiple)
+- `git.go` — Core operations: Status, Push, Pull, PushMultiple. Stdlib only, no framework dependency.
+- `service.go` — Core framework integration via `forge.lthn.ai/core/go/pkg/core`. Exposes query types (QueryStatus, QueryDirtyRepos, QueryAheadRepos) and task types (TaskPush, TaskPull, TaskPushMultiple). Service uses `core.ServiceRuntime` with query/task handler registration in `OnStartup`. Also provides iterator methods (All, Dirty, Ahead) using `iter.Seq`.
 
-## Key Types
+## Key Design Decisions
 
-```go
-type RepoStatus struct {
-    Name, Path, Branch string
-    Modified, Untracked, Staged, Ahead, Behind int
-    Error error
-}
+- **Status is parallel** (goroutine per repo), **Push/Pull are sequential** (SSH passphrase prompts need terminal interaction via stdin/stdout).
+- All paths must be absolute. Service enforces WorkDir boundary via `validatePath`.
+- `QueryStatus` and `StatusOptions` are structurally identical — cast directly between them.
+- Errors are wrapped as `*GitError` with captured stderr and command args.
 
-func Status(ctx context.Context, opts StatusOptions) []RepoStatus  // parallel
-func Push(ctx context.Context, path string) error                   // interactive (stdin/stdout)
-func Pull(ctx context.Context, path string) error                   // interactive (stdin/stdout)
-func PushMultiple(ctx context.Context, paths []string, names map[string]string) []PushResult  // sequential
-func IsNonFastForward(err error) bool
-```
+## Test Conventions
 
-## Test Naming
-
-`_Good`, `_Bad`, `_Ugly` suffix pattern. Tests use real git repos via `initTestRepo()`.
+- `_Good`, `_Bad` suffix pattern for success/failure cases.
+- Tests use real git repos created by `initTestRepo()` in temp directories.
+- Service helper tests (in `service_test.go`) construct `Service` structs directly without the framework.
+- Framework integration tests (in `service_extra_test.go`) use `core.New()` and test handler dispatch.
 
 ## Coding Standards
 
 - UK English in comments
 - `Co-Authored-By: Virgil <virgil@lethean.io>` in commits
-- Errors wrapped as `*GitError` with stderr capture
-
-## Dependency
-
-Only `forge.lthn.ai/core/go/pkg/framework` for ServiceRuntime integration. The core git operations (`git.go`) use only stdlib.
+- Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 ## Forge Remote
 
