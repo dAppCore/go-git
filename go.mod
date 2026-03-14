@@ -2,7 +2,10 @@ module forge.lthn.ai/core/go-git
 
 go 1.26.0
 
-require github.com/stretchr/testify v1.11.1
+require (
+	forge.lthn.ai/core/go v0.3.0
+	github.com/stretchr/testify v1.11.1
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
