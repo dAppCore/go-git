@@ -1,5 +1,5 @@
-forge.lthn.ai/core/go v0.3.0 h1:mOG97ApMprwx9Ked62FdWVwXTGSF6JO6m0DrVpoH2Q4=
-forge.lthn.ai/core/go v0.3.0/go.mod h1:gE6c8h+PJ2287qNhVUJ5SOe1kopEwHEquvinstpuyJc=
+forge.lthn.ai/core/go v0.3.1 h1:5FMTsUhLcxSr07F9q3uG0Goy4zq4eLivoqi8shSY4UM=
+forge.lthn.ai/core/go v0.3.1/go.mod h1:gE6c8h+PJ2287qNhVUJ5SOe1kopEwHEquvinstpuyJc=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
