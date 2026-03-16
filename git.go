@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
+	goio "io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	coreerr "forge.lthn.ai/core/go-log"
 )
 
 // RepoStatus represents the git status of a single repository.
@@ -81,7 +83,7 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 
 	// Validate path to prevent directory traversal
 	if !filepath.IsAbs(path) {
-		status.Error = fmt.Errorf("path must be absolute: %s", path)
+		status.Error = coreerr.E("git.getStatus", "path must be absolute: "+path, nil)
 		return status
 	}
 
@@ -200,7 +202,7 @@ func gitInteractive(ctx context.Context, dir string, args ...string) error {
 
 	// Capture stderr for error reporting while also showing it
 	var stderr bytes.Buffer
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	cmd.Stderr = goio.MultiWriter(os.Stderr, &stderr)
 
 	if err := cmd.Run(); err != nil {
 		return &GitError{
@@ -272,6 +274,9 @@ func gitCommand(ctx context.Context, dir string, args ...string) (string, error)
 	return stdout.String(), nil
 }
 
+// Compile-time interface checks.
+var _ error = (*GitError)(nil)
+
 // GitError wraps a git command error with stderr output and command context.
 type GitError struct {
 	Args   []string
@@ -285,9 +290,9 @@ func (e *GitError) Error() string {
 	stderr := strings.TrimSpace(e.Stderr)
 
 	if stderr != "" {
-		return fmt.Errorf("git command %q failed: %s", cmd, stderr).Error()
+		return coreerr.E("", fmt.Sprintf("git command %q failed: %s", cmd, stderr), nil).Error()
 	}
-	return fmt.Errorf("git command %q failed: %w", cmd, e.Err).Error()
+	return coreerr.E("", fmt.Sprintf("git command %q failed", cmd), e.Err).Error()
 }
 
 // Unwrap returns the underlying error for error chain inspection.

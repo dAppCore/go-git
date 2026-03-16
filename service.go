@@ -2,7 +2,6 @@ package git
 
 import (
 	"context"
-	"fmt"
 	"iter"
 	"path/filepath"
 	"slices"
@@ -10,6 +9,7 @@ import (
 	"sync"
 
 	"forge.lthn.ai/core/go/pkg/core"
+	coreerr "forge.lthn.ai/core/go-log"
 )
 
 // Queries for git service
@@ -50,6 +50,9 @@ type TaskPushMultiple struct {
 type ServiceOptions struct {
 	WorkDir string
 }
+
+// Compile-time interface checks.
+var _ core.Startable = (*Service)(nil)
 
 // Service provides git operations as a Core service.
 type Service struct {
@@ -137,14 +140,14 @@ func (s *Service) handleTask(c *core.Core, t core.Task) (any, bool, error) {
 
 func (s *Service) validatePath(path string) error {
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("path must be absolute: %s", path)
+		return coreerr.E("git.validatePath", "path must be absolute: "+path, nil)
 	}
 
 	workDir := s.opts.WorkDir
 	if workDir != "" {
 		rel, err := filepath.Rel(workDir, path)
 		if err != nil || strings.HasPrefix(rel, "..") {
-			return fmt.Errorf("path %s is outside of allowed WorkDir %s", path, workDir)
+			return coreerr.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
 		}
 	}
 	return nil
