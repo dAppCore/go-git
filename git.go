@@ -290,9 +290,12 @@ func (e *GitError) Error() string {
 	stderr := strings.TrimSpace(e.Stderr)
 
 	if stderr != "" {
-		return coreerr.E("", fmt.Sprintf("git command %q failed: %s", cmd, stderr), nil).Error()
+		return fmt.Sprintf("git command %q failed: %s", cmd, stderr)
 	}
-	return coreerr.E("", fmt.Sprintf("git command %q failed", cmd), e.Err).Error()
+	if e.Err != nil {
+		return fmt.Sprintf("git command %q failed: %v", cmd, e.Err)
+	}
+	return fmt.Sprintf("git command %q failed", cmd)
 }
 
 // Unwrap returns the underlying error for error chain inspection.
