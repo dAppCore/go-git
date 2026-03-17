@@ -200,6 +200,140 @@ func TestService_HandleTask_Good_UnknownTask(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+// --- validatePath tests ---
+
+func TestService_ValidatePath_Bad_RelativePath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	err = svc.validatePath("relative/path")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "path must be absolute")
+}
+
+func TestService_ValidatePath_Bad_OutsideWorkDir(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	err = svc.validatePath("/etc/evil")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+func TestService_ValidatePath_Good_InsideWorkDir(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	err = svc.validatePath("/home/repos/my-project")
+	assert.NoError(t, err)
+}
+
+func TestService_ValidatePath_Good_NoWorkDir(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+		opts:           ServiceOptions{},
+	}
+
+	// Without WorkDir constraint, any absolute path is valid.
+	err = svc.validatePath("/any/absolute/path")
+	assert.NoError(t, err)
+}
+
+// --- handleQuery validation tests ---
+
+func TestService_HandleQuery_Bad_InvalidPath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, _, err = svc.handleQuery(c, QueryStatus{
+		Paths: []string{"/etc/outside"},
+		Names: map[string]string{"/etc/outside": "bad"},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+// --- handleTask validation tests ---
+
+func TestService_HandleTask_Bad_PushInvalidPath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, handled, err := svc.handleTask(c, TaskPush{Path: "relative/path"})
+	assert.True(t, handled)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "path must be absolute")
+}
+
+func TestService_HandleTask_Bad_PullOutsideWorkDir(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, handled, err := svc.handleTask(c, TaskPull{Path: "/etc/evil"})
+	assert.True(t, handled)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+func TestService_HandleTask_Bad_PushMultipleInvalidPath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, handled, err := svc.handleTask(c, TaskPushMultiple{
+		Paths: []string{"/home/repos/ok", "/etc/bad"},
+		Names: map[string]string{},
+	})
+	assert.True(t, handled)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+// --- getStatus relative path test ---
+
+func TestGetStatus_Bad_RelativePath(t *testing.T) {
+	status := getStatus(context.Background(), "relative/path", "bad-repo")
+	assert.Error(t, status.Error)
+	assert.Contains(t, status.Error.Error(), "path must be absolute")
+}
+
 // --- Additional git operation tests ---
 
 func TestGetStatus_Good_AheadBehindNoUpstream(t *testing.T) {
