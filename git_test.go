@@ -372,6 +372,13 @@ func TestGetStatus_Bad_InvalidPath(t *testing.T) {
 	assert.Equal(t, "bad-repo", status.Name)
 }
 
+func TestGetStatus_Bad_RelativePath(t *testing.T) {
+	status := getStatus(context.Background(), "relative/path", "rel-repo")
+	assert.Error(t, status.Error)
+	assert.Contains(t, status.Error.Error(), "path must be absolute")
+	assert.Equal(t, "rel-repo", status.Name)
+}
+
 // --- Status (parallel multi-repo) tests ---
 
 func TestStatus_Good_MultipleRepos(t *testing.T) {

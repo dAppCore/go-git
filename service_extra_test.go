@@ -13,6 +13,104 @@ import (
 	"forge.lthn.ai/core/go/pkg/core"
 )
 
+// --- validatePath tests ---
+
+func TestService_ValidatePath_Bad_RelativePath(t *testing.T) {
+	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
+	err := svc.validatePath("relative/path")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "path must be absolute")
+}
+
+func TestService_ValidatePath_Bad_OutsideWorkDir(t *testing.T) {
+	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
+	err := svc.validatePath("/etc/passwd")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+func TestService_ValidatePath_Good_InsideWorkDir(t *testing.T) {
+	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
+	err := svc.validatePath("/home/repos/my-project")
+	assert.NoError(t, err)
+}
+
+func TestService_ValidatePath_Good_NoWorkDir(t *testing.T) {
+	svc := &Service{opts: ServiceOptions{}}
+	err := svc.validatePath("/any/absolute/path")
+	assert.NoError(t, err)
+}
+
+// --- handleQuery path validation ---
+
+func TestService_HandleQuery_Bad_InvalidPath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, handled, err := svc.handleQuery(c, QueryStatus{
+		Paths: []string{"/outside/path"},
+		Names: map[string]string{"/outside/path": "bad"},
+	})
+	assert.True(t, handled)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+// --- handleTask path validation ---
+
+func TestService_HandleTask_Bad_PushInvalidPath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, handled, err := svc.handleTask(c, TaskPush{Path: "relative/path"})
+	assert.True(t, handled)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "path must be absolute")
+}
+
+func TestService_HandleTask_Bad_PullInvalidPath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, handled, err := svc.handleTask(c, TaskPull{Path: "/etc/passwd"})
+	assert.True(t, handled)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+func TestService_HandleTask_Bad_PushMultipleInvalidPath(t *testing.T) {
+	c, err := core.New()
+	require.NoError(t, err)
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+
+	_, handled, err := svc.handleTask(c, TaskPushMultiple{
+		Paths: []string{"/home/repos/ok", "/etc/bad"},
+		Names: map[string]string{},
+	})
+	assert.True(t, handled)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
 func TestNewService_Good(t *testing.T) {
 	opts := ServiceOptions{WorkDir: t.TempDir()}
 	factory := NewService(opts)

@@ -32,7 +32,7 @@ Two files:
 
 ## Test Conventions
 
-- `_Good`, `_Bad` suffix pattern for success/failure cases.
+- `_Good` / `_Bad` suffix pattern for success / failure cases.
 - Tests use real git repos created by `initTestRepo()` in temp directories.
 - Service helper tests (in `service_test.go`) construct `Service` structs directly without the framework.
 - Framework integration tests (in `service_extra_test.go`) use `core.New()` and test handler dispatch.
