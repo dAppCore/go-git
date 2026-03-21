@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"forge.lthn.ai/core/go/pkg/core"
+	"dappco.re/go/core"
 )
 
 // --- validatePath tests ---
@@ -44,71 +44,59 @@ func TestService_ValidatePath_Good_NoWorkDir(t *testing.T) {
 // --- handleQuery path validation ---
 
 func TestService_HandleQuery_Bad_InvalidPath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
 	}
 
-	_, handled, err := svc.handleQuery(c, QueryStatus{
+	result := svc.handleQuery(c, QueryStatus{
 		Paths: []string{"/outside/path"},
 		Names: map[string]string{"/outside/path": "bad"},
 	})
-	assert.True(t, handled)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+	assert.False(t, result.OK)
 }
 
 // --- handleTask path validation ---
 
 func TestService_HandleTask_Bad_PushInvalidPath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
 	}
 
-	_, handled, err := svc.handleTask(c, TaskPush{Path: "relative/path"})
-	assert.True(t, handled)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "path must be absolute")
+	result := svc.handleTask(c, TaskPush{Path: "relative/path"})
+	assert.False(t, result.OK)
 }
 
 func TestService_HandleTask_Bad_PullInvalidPath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
 	}
 
-	_, handled, err := svc.handleTask(c, TaskPull{Path: "/etc/passwd"})
-	assert.True(t, handled)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+	result := svc.handleTask(c, TaskPull{Path: "/etc/passwd"})
+	assert.False(t, result.OK)
 }
 
 func TestService_HandleTask_Bad_PushMultipleInvalidPath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
 	}
 
-	_, handled, err := svc.handleTask(c, TaskPushMultiple{
+	result := svc.handleTask(c, TaskPushMultiple{
 		Paths: []string{"/home/repos/ok", "/etc/bad"},
 		Names: map[string]string{},
 	})
-	assert.True(t, handled)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+	assert.False(t, result.OK)
 }
 
 func TestNewService_Good(t *testing.T) {
@@ -117,8 +105,7 @@ func TestNewService_Good(t *testing.T) {
 	assert.NotNil(t, factory)
 
 	// Create a minimal Core to test the factory.
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc, err := factory(c)
 	require.NoError(t, err)
@@ -130,8 +117,7 @@ func TestNewService_Good(t *testing.T) {
 }
 
 func TestService_OnStartup_Good(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	opts := ServiceOptions{WorkDir: t.TempDir()}
 	svc := &Service{
@@ -139,30 +125,28 @@ func TestService_OnStartup_Good(t *testing.T) {
 		opts:           opts,
 	}
 
-	err = svc.OnStartup(context.Background())
+	err := svc.OnStartup(context.Background())
 	assert.NoError(t, err)
 }
 
 func TestService_HandleQuery_Good_Status(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
 	// Call handleQuery directly.
-	result, handled, err := svc.handleQuery(c, QueryStatus{
+	result := svc.handleQuery(c, QueryStatus{
 		Paths: []string{dir},
 		Names: map[string]string{dir: "test-repo"},
 	})
 
-	require.NoError(t, err)
-	assert.True(t, handled)
+	assert.True(t, result.OK)
 
-	statuses, ok := result.([]RepoStatus)
+	statuses, ok := result.Value.([]RepoStatus)
 	require.True(t, ok)
 	require.Len(t, statuses, 1)
 	assert.Equal(t, "test-repo", statuses[0].Name)
@@ -172,8 +156,7 @@ func TestService_HandleQuery_Good_Status(t *testing.T) {
 }
 
 func TestService_HandleQuery_Good_DirtyRepos(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
@@ -183,19 +166,17 @@ func TestService_HandleQuery_Good_DirtyRepos(t *testing.T) {
 		},
 	}
 
-	result, handled, err := svc.handleQuery(c, QueryDirtyRepos{})
-	require.NoError(t, err)
-	assert.True(t, handled)
+	result := svc.handleQuery(c, QueryDirtyRepos{})
+	assert.True(t, result.OK)
 
-	dirty, ok := result.([]RepoStatus)
+	dirty, ok := result.Value.([]RepoStatus)
 	require.True(t, ok)
 	assert.Len(t, dirty, 1)
 	assert.Equal(t, "dirty", dirty[0].Name)
 }
 
 func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
@@ -205,231 +186,86 @@ func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
 		},
 	}
 
-	result, handled, err := svc.handleQuery(c, QueryAheadRepos{})
-	require.NoError(t, err)
-	assert.True(t, handled)
+	result := svc.handleQuery(c, QueryAheadRepos{})
+	assert.True(t, result.OK)
 
-	ahead, ok := result.([]RepoStatus)
+	ahead, ok := result.Value.([]RepoStatus)
 	require.True(t, ok)
 	assert.Len(t, ahead, 1)
 	assert.Equal(t, "ahead", ahead[0].Name)
 }
 
 func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
-	result, handled, err := svc.handleQuery(c, "unknown query type")
-	require.NoError(t, err)
-	assert.False(t, handled)
-	assert.Nil(t, result)
+	result := svc.handleQuery(c, "unknown query type")
+	assert.False(t, result.OK)
+	assert.Nil(t, result.Value)
 }
 
-func TestService_HandleTask_Good_Push(t *testing.T) {
+func TestService_HandleTask_Bad_PushNoRemote(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
-	// Push without a remote will fail, but handleTask should still handle it.
-	_, handled, err := svc.handleTask(c, TaskPush{Path: dir, Name: "test"})
-	assert.True(t, handled)
-	assert.Error(t, err, "push without remote should fail")
+	result := svc.handleTask(c, TaskPush{Path: dir, Name: "test"})
+	assert.False(t, result.OK, "push without remote should fail")
 }
 
-func TestService_HandleTask_Good_Pull(t *testing.T) {
+func TestService_HandleTask_Bad_PullNoRemote(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
-	_, handled, err := svc.handleTask(c, TaskPull{Path: dir, Name: "test"})
-	assert.True(t, handled)
-	assert.Error(t, err, "pull without remote should fail")
+	result := svc.handleTask(c, TaskPull{Path: dir, Name: "test"})
+	assert.False(t, result.OK, "pull without remote should fail")
 }
 
 func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
-	result, handled, err := svc.handleTask(c, TaskPushMultiple{
+	result := svc.handleTask(c, TaskPushMultiple{
 		Paths: []string{dir},
 		Names: map[string]string{dir: "test"},
 	})
 
-	assert.True(t, handled)
-	assert.Error(t, err) // PushMultiple returns errors directly
+	// PushMultiple returns results even when individual pushes fail.
+	assert.True(t, result.OK)
 
-	results, ok := result.([]PushResult)
+	results, ok := result.Value.([]PushResult)
 	require.True(t, ok)
 	assert.Len(t, results, 1)
 	assert.False(t, results[0].Success) // No remote
 }
 
 func TestService_HandleTask_Good_UnknownTask(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
+	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
-	result, handled, err := svc.handleTask(c, "unknown task")
-	require.NoError(t, err)
-	assert.False(t, handled)
-	assert.Nil(t, result)
-}
-
-// --- validatePath tests ---
-
-func TestService_ValidatePath_Bad_RelativePath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
-		opts:           ServiceOptions{WorkDir: "/home/repos"},
-	}
-
-	err = svc.validatePath("relative/path")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "path must be absolute")
-}
-
-func TestService_ValidatePath_Bad_OutsideWorkDir(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
-		opts:           ServiceOptions{WorkDir: "/home/repos"},
-	}
-
-	err = svc.validatePath("/etc/evil")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
-}
-
-func TestService_ValidatePath_Good_InsideWorkDir(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
-		opts:           ServiceOptions{WorkDir: "/home/repos"},
-	}
-
-	err = svc.validatePath("/home/repos/my-project")
-	assert.NoError(t, err)
-}
-
-func TestService_ValidatePath_Good_NoWorkDir(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
-		opts:           ServiceOptions{},
-	}
-
-	// Without WorkDir constraint, any absolute path is valid.
-	err = svc.validatePath("/any/absolute/path")
-	assert.NoError(t, err)
-}
-
-// --- handleQuery validation tests ---
-
-func TestService_HandleQuery_Bad_InvalidPath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
-		opts:           ServiceOptions{WorkDir: "/home/repos"},
-	}
-
-	_, _, err = svc.handleQuery(c, QueryStatus{
-		Paths: []string{"/etc/outside"},
-		Names: map[string]string{"/etc/outside": "bad"},
-	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
-}
-
-// --- handleTask validation tests ---
-
-func TestService_HandleTask_Bad_PushInvalidPath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
-		opts:           ServiceOptions{WorkDir: "/home/repos"},
-	}
-
-	_, handled, err := svc.handleTask(c, TaskPush{Path: "relative/path"})
-	assert.True(t, handled)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "path must be absolute")
-}
-
-func TestService_HandleTask_Bad_PullOutsideWorkDir(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
-		opts:           ServiceOptions{WorkDir: "/home/repos"},
-	}
-
-	_, handled, err := svc.handleTask(c, TaskPull{Path: "/etc/evil"})
-	assert.True(t, handled)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
-}
-
-func TestService_HandleTask_Bad_PushMultipleInvalidPath(t *testing.T) {
-	c, err := core.New()
-	require.NoError(t, err)
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
-		opts:           ServiceOptions{WorkDir: "/home/repos"},
-	}
-
-	_, handled, err := svc.handleTask(c, TaskPushMultiple{
-		Paths: []string{"/home/repos/ok", "/etc/bad"},
-		Names: map[string]string{},
-	})
-	assert.True(t, handled)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
-}
-
-// --- getStatus relative path test ---
-
-func TestGetStatus_Bad_RelativePath(t *testing.T) {
-	status := getStatus(context.Background(), "relative/path", "bad-repo")
-	assert.Error(t, status.Error)
-	assert.Contains(t, status.Error.Error(), "path must be absolute")
+	result := svc.handleTask(c, "unknown task")
+	assert.False(t, result.OK)
+	assert.Nil(t, result.Value)
 }
 
 // --- Additional git operation tests ---

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"forge.lthn.ai/core/go/pkg/core"
+	"dappco.re/go/core"
 	coreerr "forge.lthn.ai/core/go-log"
 )
 
@@ -79,7 +79,7 @@ func (s *Service) OnStartup(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) handleQuery(c *core.Core, q core.Query) (any, bool, error) {
+func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 	ctx := context.Background() // TODO: core should pass context to handlers
 
 	switch m := q.(type) {
@@ -87,7 +87,7 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) (any, bool, error) {
 		// Validate all paths before execution
 		for _, path := range m.Paths {
 			if err := s.validatePath(path); err != nil {
-				return nil, true, err
+				return c.LogError(err, "git.handleQuery", "path validation failed")
 			}
 		}
 
@@ -97,45 +97,53 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) (any, bool, error) {
 		s.lastStatus = statuses
 		s.mu.Unlock()
 
-		return statuses, true, nil
+		return core.Result{Value: statuses, OK: true}
 
 	case QueryDirtyRepos:
-		return s.DirtyRepos(), true, nil
+		return core.Result{Value: s.DirtyRepos(), OK: true}
 
 	case QueryAheadRepos:
-		return s.AheadRepos(), true, nil
+		return core.Result{Value: s.AheadRepos(), OK: true}
 	}
-	return nil, false, nil
+	return core.Result{}
 }
 
-func (s *Service) handleTask(c *core.Core, t core.Task) (any, bool, error) {
+func (s *Service) handleTask(c *core.Core, t core.Task) core.Result {
 	ctx := context.Background() // TODO: core should pass context to handlers
 
 	switch m := t.(type) {
 	case TaskPush:
 		if err := s.validatePath(m.Path); err != nil {
-			return nil, true, err
+			return c.LogError(err, "git.handleTask", "path validation failed")
 		}
-		err := Push(ctx, m.Path)
-		return nil, true, err
+		if err := Push(ctx, m.Path); err != nil {
+			return c.LogError(err, "git.handleTask", "push failed")
+		}
+		return core.Result{OK: true}
 
 	case TaskPull:
 		if err := s.validatePath(m.Path); err != nil {
-			return nil, true, err
+			return c.LogError(err, "git.handleTask", "path validation failed")
 		}
-		err := Pull(ctx, m.Path)
-		return nil, true, err
+		if err := Pull(ctx, m.Path); err != nil {
+			return c.LogError(err, "git.handleTask", "pull failed")
+		}
+		return core.Result{OK: true}
 
 	case TaskPushMultiple:
 		for _, path := range m.Paths {
 			if err := s.validatePath(path); err != nil {
-				return nil, true, err
+				return c.LogError(err, "git.handleTask", "path validation failed")
 			}
 		}
 		results, err := PushMultiple(ctx, m.Paths, m.Names)
-		return results, true, err
+		if err != nil {
+			// Log for observability; partial results are still returned.
+			_ = c.LogError(err, "git.handleTask", "push multiple had failures")
+		}
+		return core.Result{Value: results, OK: true}
 	}
-	return nil, false, nil
+	return core.Result{}
 }
 
 func (s *Service) validatePath(path string) error {
