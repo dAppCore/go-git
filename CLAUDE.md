@@ -21,7 +21,7 @@ golangci-lint run ./...    # Lint (see .golangci.yml for enabled linters)
 
 Two files:
 - `git.go` — Core operations: Status, Push, Pull, PushMultiple. Stdlib only, no framework dependency.
-- `service.go` — Core framework integration via `forge.lthn.ai/core/go/pkg/core`. Exposes query types (QueryStatus, QueryDirtyRepos, QueryAheadRepos) and task types (TaskPush, TaskPull, TaskPushMultiple). Service uses `core.ServiceRuntime` with query/task handler registration in `OnStartup`. Also provides iterator methods (All, Dirty, Ahead) using `iter.Seq`.
+- `service.go` — Core framework integration via `dappco.re/go/core`. Exposes query types (QueryStatus, QueryDirtyRepos, QueryAheadRepos) and task types (TaskPush, TaskPull, TaskPushMultiple). Service uses `core.ServiceRuntime` with query/task handler registration in `OnStartup`. Also provides iterator methods (All, Dirty, Ahead) using `iter.Seq`.
 
 ## Key Design Decisions
 
