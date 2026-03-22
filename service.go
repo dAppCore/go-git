@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"dappco.re/go/core"
-	coreerr "forge.lthn.ai/core/go-log"
 )
 
 // Queries for git service
@@ -148,14 +147,14 @@ func (s *Service) handleTask(c *core.Core, t core.Task) core.Result {
 
 func (s *Service) validatePath(path string) error {
 	if !filepath.IsAbs(path) {
-		return coreerr.E("git.validatePath", "path must be absolute: "+path, nil)
+		return core.E("git.validatePath", "path must be absolute: "+path, nil)
 	}
 
 	workDir := s.opts.WorkDir
 	if workDir != "" {
 		rel, err := filepath.Rel(workDir, path)
 		if err != nil || strings.HasPrefix(rel, "..") {
-			return coreerr.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
+			return core.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
 		}
 	}
 	return nil
