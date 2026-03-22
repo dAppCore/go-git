@@ -13,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	coreerr "forge.lthn.ai/core/go-log"
 )
 
 // RepoStatus represents the git status of a single repository.
@@ -83,7 +81,7 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 
 	// Validate path to prevent directory traversal
 	if !filepath.IsAbs(path) {
-		status.Error = coreerr.E("git.getStatus", "path must be absolute: "+path, nil)
+		status.Error = fmt.Errorf("git.getStatus: path must be absolute: %s", path)
 		return status
 	}
 
