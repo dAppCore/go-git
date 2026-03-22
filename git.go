@@ -136,31 +136,30 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	return status
 }
 
+// isNoUpstreamError reports whether an error is due to a missing tracking branch.
+func isNoUpstreamError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "no upstream") || strings.Contains(msg, "No upstream")
+}
+
 // getAheadBehind returns the number of commits ahead and behind upstream.
 func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err error) {
-	// Try to get ahead count
 	aheadStr, err := gitCommand(ctx, path, "rev-list", "--count", "@{u}..HEAD")
 	if err == nil {
 		ahead, _ = strconv.Atoi(strings.TrimSpace(aheadStr))
-	} else {
-		// If it failed because of no upstream, don't return error
-		if strings.Contains(err.Error(), "no upstream") || strings.Contains(err.Error(), "No upstream") {
-			err = nil
-		}
+	} else if isNoUpstreamError(err) {
+		err = nil
 	}
 
 	if err != nil {
 		return 0, 0, err
 	}
 
-	// Try to get behind count
 	behindStr, err := gitCommand(ctx, path, "rev-list", "--count", "HEAD..@{u}")
 	if err == nil {
 		behind, _ = strconv.Atoi(strings.TrimSpace(behindStr))
-	} else {
-		if strings.Contains(err.Error(), "no upstream") || strings.Contains(err.Error(), "No upstream") {
-			err = nil
-		}
+	} else if isNoUpstreamError(err) {
+		err = nil
 	}
 
 	return ahead, behind, err

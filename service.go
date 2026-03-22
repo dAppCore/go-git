@@ -175,14 +175,14 @@ func (s *Service) All() iter.Seq[RepoStatus] {
 	return slices.Values(slices.Clone(s.lastStatus))
 }
 
-// filterStatuses returns an iterator over statuses matching pred, with no error.
-func (s *Service) filterStatuses(pred func(RepoStatus) bool) iter.Seq[RepoStatus] {
+// filteredIter returns an iterator over status entries that satisfy pred.
+func (s *Service) filteredIter(pred func(RepoStatus) bool) iter.Seq[RepoStatus] {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	lastStatus := slices.Clone(s.lastStatus)
+	snapshot := slices.Clone(s.lastStatus)
 
 	return func(yield func(RepoStatus) bool) {
-		for _, st := range lastStatus {
+		for _, st := range snapshot {
 			if st.Error == nil && pred(st) {
 				if !yield(st) {
 					return
@@ -194,12 +194,12 @@ func (s *Service) filterStatuses(pred func(RepoStatus) bool) iter.Seq[RepoStatus
 
 // Dirty returns an iterator over repos with uncommitted changes.
 func (s *Service) Dirty() iter.Seq[RepoStatus] {
-	return s.filterStatuses(func(st RepoStatus) bool { return st.IsDirty() })
+	return s.filteredIter(func(st RepoStatus) bool { return st.IsDirty() })
 }
 
 // Ahead returns an iterator over repos with unpushed commits.
 func (s *Service) Ahead() iter.Seq[RepoStatus] {
-	return s.filterStatuses(func(st RepoStatus) bool { return st.HasUnpushed() })
+	return s.filteredIter(func(st RepoStatus) bool { return st.HasUnpushed() })
 }
 
 // DirtyRepos returns repos with uncommitted changes.
