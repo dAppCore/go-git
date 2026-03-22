@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"dappco.re/go/core"
-	coreerr "forge.lthn.ai/core/go-log"
+	coreerr "dappco.re/go/core/log"
 )
 
 // Queries for git service
@@ -175,15 +175,15 @@ func (s *Service) All() iter.Seq[RepoStatus] {
 	return slices.Values(slices.Clone(s.lastStatus))
 }
 
-// Dirty returns an iterator over repos with uncommitted changes.
-func (s *Service) Dirty() iter.Seq[RepoStatus] {
+// filterStatuses returns an iterator over statuses matching pred, with no error.
+func (s *Service) filterStatuses(pred func(RepoStatus) bool) iter.Seq[RepoStatus] {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	lastStatus := slices.Clone(s.lastStatus)
 
 	return func(yield func(RepoStatus) bool) {
 		for _, st := range lastStatus {
-			if st.Error == nil && st.IsDirty() {
+			if st.Error == nil && pred(st) {
 				if !yield(st) {
 					return
 				}
@@ -192,21 +192,14 @@ func (s *Service) Dirty() iter.Seq[RepoStatus] {
 	}
 }
 
+// Dirty returns an iterator over repos with uncommitted changes.
+func (s *Service) Dirty() iter.Seq[RepoStatus] {
+	return s.filterStatuses(func(st RepoStatus) bool { return st.IsDirty() })
+}
+
 // Ahead returns an iterator over repos with unpushed commits.
 func (s *Service) Ahead() iter.Seq[RepoStatus] {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	lastStatus := slices.Clone(s.lastStatus)
-
-	return func(yield func(RepoStatus) bool) {
-		for _, st := range lastStatus {
-			if st.Error == nil && st.HasUnpushed() {
-				if !yield(st) {
-					return
-				}
-			}
-		}
-	}
+	return s.filterStatuses(func(st RepoStatus) bool { return st.HasUnpushed() })
 }
 
 // DirtyRepos returns repos with uncommitted changes.
