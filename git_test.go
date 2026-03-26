@@ -49,7 +49,7 @@ func initTestRepo(t *testing.T) string {
 
 // --- RepoStatus method tests ---
 
-func TestRepoStatus_IsDirty(t *testing.T) {
+func TestRepoStatus_IsDirty_Good(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
@@ -99,7 +99,7 @@ func TestRepoStatus_IsDirty(t *testing.T) {
 	}
 }
 
-func TestRepoStatus_HasUnpushed(t *testing.T) {
+func TestRepoStatus_HasUnpushed_Good(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
@@ -129,7 +129,7 @@ func TestRepoStatus_HasUnpushed(t *testing.T) {
 	}
 }
 
-func TestRepoStatus_HasUnpulled(t *testing.T) {
+func TestRepoStatus_HasUnpulled_Good(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
@@ -161,7 +161,7 @@ func TestRepoStatus_HasUnpulled(t *testing.T) {
 
 // --- GitError tests ---
 
-func TestGitError_Error(t *testing.T) {
+func TestGitError_Error_Good(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      *GitError
@@ -186,7 +186,7 @@ func TestGitError_Error(t *testing.T) {
 	}
 }
 
-func TestGitError_Unwrap(t *testing.T) {
+func TestGitError_Unwrap_Good(t *testing.T) {
 	inner := errors.New("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
 	assert.Equal(t, inner, gitErr.Unwrap())
@@ -195,7 +195,7 @@ func TestGitError_Unwrap(t *testing.T) {
 
 // --- IsNonFastForward tests ---
 
-func TestIsNonFastForward(t *testing.T) {
+func TestIsNonFastForward_Good(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
@@ -446,7 +446,7 @@ func TestStatus_Good_WithErrors(t *testing.T) {
 
 // --- PushMultiple tests ---
 
-func TestPushMultiple_Good_NoRemote(t *testing.T) {
+func TestPushMultiple_Bad_NoRemote(t *testing.T) {
 	// Push without a remote will fail but we can test the result structure.
 	dir, _ := filepath.Abs(initTestRepo(t))
 
@@ -463,7 +463,7 @@ func TestPushMultiple_Good_NoRemote(t *testing.T) {
 	assert.Error(t, results[0].Error)
 }
 
-func TestPushMultiple_Good_NameFallback(t *testing.T) {
+func TestPushMultiple_Bad_NoRemote_NameFallback(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{})
@@ -491,7 +491,7 @@ func TestPush_Bad_NoRemote(t *testing.T) {
 
 // --- Context cancellation test ---
 
-func TestGetStatus_Good_ContextCancellation(t *testing.T) {
+func TestGetStatus_Bad_ContextCancellation(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	ctx, cancel := context.WithCancel(context.Background())

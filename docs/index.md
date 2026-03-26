@@ -62,32 +62,40 @@ func main() {
 package main
 
 import (
+    "context"
     "fmt"
 
-    "forge.lthn.ai/core/go/pkg/core"
+    "dappco.re/go/core"
     git "forge.lthn.ai/core/go-git"
 )
 
 func main() {
-    c, err := core.New(
-        core.WithService(git.NewService(git.ServiceOptions{
-            WorkDir: "/home/dev/projects",
-        })),
-    )
+    c := core.New()
+
+    factory := git.NewService(git.ServiceOptions{
+        WorkDir: "/home/dev/projects",
+    })
+
+    raw, err := factory(c)
     if err != nil {
+        panic(err)
+    }
+
+    svc := raw.(*git.Service)
+    if err := svc.OnStartup(context.Background()); err != nil {
         panic(err)
     }
 
     // Query status via the message bus.
-    result, err := c.Query(git.QueryStatus{
+    result := c.Query(git.QueryStatus{
         Paths: []string{"/home/dev/projects/repo-a"},
         Names: map[string]string{"/home/dev/projects/repo-a": "repo-a"},
     })
-    if err != nil {
-        panic(err)
+    if !result.OK {
+        panic(result.Value)
     }
 
-    statuses := result.([]git.RepoStatus)
+    statuses := result.Value.([]git.RepoStatus)
     for _, s := range statuses {
         fmt.Printf("%s: dirty=%v ahead=%v\n", s.Name, s.IsDirty(), s.HasUnpushed())
     }
@@ -108,7 +116,7 @@ func main() {
 
 | Dependency | Purpose |
 |------------|---------|
-| `forge.lthn.ai/core/go/pkg/core` | DI container, `ServiceRuntime`, query/task bus (used only by `service.go`). |
+| `dappco.re/go/core` | DI container, `ServiceRuntime`, query/task bus (used only by `service.go`). |
 | `github.com/stretchr/testify` | Assertions in tests (test-only). |
 
 The standalone layer (`git.go`) uses only the Go standard library. It shells out to the system `git` binary -- there is no embedded Git implementation.

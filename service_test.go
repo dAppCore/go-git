@@ -138,7 +138,7 @@ func TestService_Status_Good_NilSlice(t *testing.T) {
 
 // --- Query/Task type tests ---
 
-func TestQueryStatus_MapsToStatusOptions(t *testing.T) {
+func TestQueryStatus_Good_MapsToStatusOptions(t *testing.T) {
 	q := QueryStatus{
 		Paths: []string{"/path/a", "/path/b"},
 		Names: map[string]string{"/path/a": "repo-a"},
@@ -150,7 +150,7 @@ func TestQueryStatus_MapsToStatusOptions(t *testing.T) {
 	assert.Equal(t, q.Names, opts.Names)
 }
 
-func TestServiceOptions_WorkDir(t *testing.T) {
+func TestServiceOptions_Good_WorkDir(t *testing.T) {
 	opts := ServiceOptions{WorkDir: "/home/claude/repos"}
 	assert.Equal(t, "/home/claude/repos", opts.WorkDir)
 }

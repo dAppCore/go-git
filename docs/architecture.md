@@ -115,14 +115,23 @@ This allows callers to distinguish between network errors and conflicts that req
 
 ### Registration
 
-`NewService()` returns a factory function compatible with `core.WithService()`:
+`NewService()` returns a factory function that binds a `*Service` to a `*core.Core`:
 
 ```go
-c, err := core.New(
-    core.WithService(git.NewService(git.ServiceOptions{
-        WorkDir: "/home/dev/repos",
-    })),
-)
+c := core.New()
+factory := git.NewService(git.ServiceOptions{
+    WorkDir: "/home/dev/repos",
+})
+
+raw, err := factory(c)
+if err != nil {
+    panic(err)
+}
+
+svc := raw.(*git.Service)
+if err := svc.OnStartup(context.Background()); err != nil {
+    panic(err)
+}
 ```
 
 The factory constructs a `Service` embedding `core.ServiceRuntime[ServiceOptions]`.
@@ -171,12 +180,12 @@ All query and task handlers validate paths before execution:
 ```go
 func (s *Service) validatePath(path string) error {
     if !filepath.IsAbs(path) {
-        return fmt.Errorf("path must be absolute: %s", path)
+        return core.E("git.validatePath", "path must be absolute: "+path, nil)
     }
     if s.opts.WorkDir != "" {
         rel, err := filepath.Rel(s.opts.WorkDir, path)
         if err != nil || strings.HasPrefix(rel, "..") {
-            return fmt.Errorf("path %s is outside of allowed WorkDir %s", path, s.opts.WorkDir)
+            return core.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+s.opts.WorkDir, nil)
         }
     }
     return nil

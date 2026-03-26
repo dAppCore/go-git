@@ -195,7 +195,7 @@ func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
 	assert.Equal(t, "ahead", ahead[0].Name)
 }
 
-func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
+func TestService_HandleQuery_Bad_UnknownQuery(t *testing.T) {
 	c := core.New()
 
 	svc := &Service{
@@ -256,7 +256,7 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	assert.False(t, results[0].Success) // No remote
 }
 
-func TestService_HandleTask_Good_UnknownTask(t *testing.T) {
+func TestService_HandleTask_Bad_UnknownTask(t *testing.T) {
 	c := core.New()
 
 	svc := &Service{
@@ -286,7 +286,7 @@ func TestPushMultiple_Good_Empty(t *testing.T) {
 	assert.Empty(t, results)
 }
 
-func TestPushMultiple_Good_MultiplePaths(t *testing.T) {
+func TestPushMultiple_Bad_NoRemote_MultiplePaths(t *testing.T) {
 	dir1, _ := filepath.Abs(initTestRepo(t))
 	dir2, _ := filepath.Abs(initTestRepo(t))
 
