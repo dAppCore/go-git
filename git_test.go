@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	core "dappco.re/go/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ func initTestRepo(t *testing.T) string {
 	}
 
 	// Create a file and commit it so HEAD exists.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Test\n"), 0644))
 
 	cmds = [][]string{
 		{"git", "add", "README.md"},
@@ -190,7 +191,7 @@ func TestGitError_Unwrap(t *testing.T) {
 	inner := errors.New("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
 	assert.Equal(t, inner, gitErr.Unwrap())
-	assert.True(t, errors.Is(gitErr, inner))
+	assert.True(t, core.Is(gitErr, inner))
 }
 
 // --- IsNonFastForward tests ---
@@ -259,7 +260,7 @@ func TestGitCommand_Bad_NotARepo(t *testing.T) {
 
 	// Should be a GitError with stderr.
 	var gitErr *GitError
-	if errors.As(err, &gitErr) {
+	if core.As(err, &gitErr) {
 		assert.Contains(t, gitErr.Stderr, "not a git repository")
 		assert.Equal(t, []string{"status"}, gitErr.Args)
 	}
@@ -282,7 +283,7 @@ func TestGetStatus_Good_ModifiedFile(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Modify the existing tracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified\n"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Modified\n"), 0644))
 
 	status := getStatus(context.Background(), dir, "modified-repo")
 	require.NoError(t, status.Error)
@@ -294,7 +295,7 @@ func TestGetStatus_Good_UntrackedFile(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Create a new untracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "newfile.txt"), []byte("hello"), 0644))
 
 	status := getStatus(context.Background(), dir, "untracked-repo")
 	require.NoError(t, status.Error)
@@ -306,7 +307,7 @@ func TestGetStatus_Good_StagedFile(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Create and stage a new file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "staged.txt"), []byte("staged"), 0644))
 	cmd := exec.Command("git", "add", "staged.txt")
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
@@ -321,13 +322,13 @@ func TestGetStatus_Good_MixedChanges(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Create untracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "untracked.txt"), []byte("new"), 0644))
 
 	// Modify tracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Changed\n"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Changed\n"), 0644))
 
 	// Create and stage another file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "staged.txt"), []byte("staged"), 0644))
 	cmd := exec.Command("git", "add", "staged.txt")
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
@@ -344,7 +345,7 @@ func TestGetStatus_Good_DeletedTrackedFile(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	// Delete the tracked file (unstaged deletion).
-	require.NoError(t, os.Remove(filepath.Join(dir, "README.md")))
+	require.NoError(t, os.Remove(core.JoinPath(dir, "README.md")))
 
 	status := getStatus(context.Background(), dir, "deleted-repo")
 	require.NoError(t, status.Error)
@@ -386,7 +387,7 @@ func TestStatus_Good_MultipleRepos(t *testing.T) {
 	dir2, _ := filepath.Abs(initTestRepo(t))
 
 	// Make dir2 dirty.
-	require.NoError(t, os.WriteFile(filepath.Join(dir2, "extra.txt"), []byte("extra"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(dir2, "extra.txt"), []byte("extra"), 0644))
 
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{dir1, dir2},
@@ -529,7 +530,7 @@ func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
 	}
 
 	// Create initial commit and push.
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v1"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v1"), 0644))
 	for _, args := range [][]string{
 		{"git", "add", "."},
 		{"git", "commit", "-m", "initial"},
@@ -542,7 +543,7 @@ func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
 	}
 
 	// Make a local commit without pushing (ahead by 1).
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v2"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v2"), 0644))
 	for _, args := range [][]string{
 		{"git", "add", "."},
 		{"git", "commit", "-m", "local commit"},

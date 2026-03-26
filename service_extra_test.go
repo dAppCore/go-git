@@ -60,42 +60,52 @@ func TestService_HandleQuery_Bad_InvalidPath(t *testing.T) {
 
 // --- handleTask path validation ---
 
-func TestService_HandleTask_Bad_PushInvalidPath(t *testing.T) {
+func TestService_Action_Bad_PushInvalidPath(t *testing.T) {
 	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
 	}
+	svc.OnStartup(context.Background())
 
-	result := svc.handleTask(c, TaskPush{Path: "relative/path"})
+	result := c.Action("git.push").Run(context.Background(), core.NewOptions(
+		core.Option{Key: "path", Value: "relative/path"},
+	))
+	_ = svc
 	assert.False(t, result.OK)
 }
 
-func TestService_HandleTask_Bad_PullInvalidPath(t *testing.T) {
+func TestService_Action_Bad_PullInvalidPath(t *testing.T) {
 	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
 	}
+	svc.OnStartup(context.Background())
 
-	result := svc.handleTask(c, TaskPull{Path: "/etc/passwd"})
+	result := c.Action("git.pull").Run(context.Background(), core.NewOptions(
+		core.Option{Key: "path", Value: "/etc/passwd"},
+	))
+	_ = svc
 	assert.False(t, result.OK)
 }
 
-func TestService_HandleTask_Bad_PushMultipleInvalidPath(t *testing.T) {
+func TestService_Action_Bad_PushMultipleInvalidPath(t *testing.T) {
 	c := core.New()
 
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
 	}
+	svc.OnStartup(context.Background())
 
-	result := svc.handleTask(c, TaskPushMultiple{
-		Paths: []string{"/home/repos/ok", "/etc/bad"},
-		Names: map[string]string{},
-	})
+	opts := core.NewOptions()
+	opts.Set("paths", []string{"/home/repos/ok", "/etc/bad"})
+	opts.Set("names", map[string]string{})
+	result := c.Action("git.push-multiple").Run(context.Background(), opts)
+	_ = svc
 	assert.False(t, result.OK)
 }
 
@@ -125,8 +135,8 @@ func TestService_OnStartup_Good(t *testing.T) {
 		opts:           opts,
 	}
 
-	err := svc.OnStartup(context.Background())
-	assert.NoError(t, err)
+	result := svc.OnStartup(context.Background())
+	assert.True(t, result.OK)
 }
 
 func TestService_HandleQuery_Good_Status(t *testing.T) {
@@ -207,7 +217,7 @@ func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
 	assert.Nil(t, result.Value)
 }
 
-func TestService_HandleTask_Bad_PushNoRemote(t *testing.T) {
+func TestService_Action_Bad_PushNoRemote(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c := core.New()
@@ -215,12 +225,15 @@ func TestService_HandleTask_Bad_PushNoRemote(t *testing.T) {
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
+	svc.OnStartup(context.Background())
 
-	result := svc.handleTask(c, TaskPush{Path: dir, Name: "test"})
+	result := c.Action("git.push").Run(context.Background(), core.NewOptions(
+		core.Option{Key: "path", Value: dir},
+	))
 	assert.False(t, result.OK, "push without remote should fail")
 }
 
-func TestService_HandleTask_Bad_PullNoRemote(t *testing.T) {
+func TestService_Action_Bad_PullNoRemote(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c := core.New()
@@ -228,12 +241,15 @@ func TestService_HandleTask_Bad_PullNoRemote(t *testing.T) {
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
+	svc.OnStartup(context.Background())
 
-	result := svc.handleTask(c, TaskPull{Path: dir, Name: "test"})
+	result := c.Action("git.pull").Run(context.Background(), core.NewOptions(
+		core.Option{Key: "path", Value: dir},
+	))
 	assert.False(t, result.OK, "pull without remote should fail")
 }
 
-func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
+func TestService_Action_Good_PushMultiple(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c := core.New()
@@ -241,11 +257,13 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
+	svc.OnStartup(context.Background())
 
-	result := svc.handleTask(c, TaskPushMultiple{
-		Paths: []string{dir},
-		Names: map[string]string{dir: "test"},
-	})
+	opts := core.NewOptions()
+	opts.Set("paths", []string{dir})
+	opts.Set("names", map[string]string{dir: "test"})
+	result := c.Action("git.push-multiple").Run(context.Background(), opts)
+	_ = svc
 
 	// PushMultiple returns results even when individual pushes fail.
 	assert.True(t, result.OK)
@@ -254,18 +272,6 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, results, 1)
 	assert.False(t, results[0].Success) // No remote
-}
-
-func TestService_HandleTask_Good_UnknownTask(t *testing.T) {
-	c := core.New()
-
-	svc := &Service{
-		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
-	}
-
-	result := svc.handleTask(c, "unknown task")
-	assert.False(t, result.OK)
-	assert.Nil(t, result.Value)
 }
 
 // --- Additional git operation tests ---
@@ -325,7 +331,7 @@ func TestPush_Good_WithRemote(t *testing.T) {
 		require.NoError(t, cmd.Run())
 	}
 
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v1"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v1"), 0644))
 	for _, args := range [][]string{
 		{"git", "add", "."},
 		{"git", "commit", "-m", "initial"},
@@ -338,7 +344,7 @@ func TestPush_Good_WithRemote(t *testing.T) {
 	}
 
 	// Make a local commit.
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v2"), 0644))
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v2"), 0644))
 	for _, args := range [][]string{
 		{"git", "add", "."},
 		{"git", "commit", "-m", "second commit"},

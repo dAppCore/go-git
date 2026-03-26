@@ -4,15 +4,16 @@ package git
 import (
 	"bytes"
 	"context"
-	"fmt"
 	goio "io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+
+	core "dappco.re/go/core"
+	coreerr "dappco.re/go/core/log"
 )
 
 // RepoStatus represents the git status of a single repository.
@@ -80,8 +81,8 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	}
 
 	// Validate path to prevent directory traversal
-	if !filepath.IsAbs(path) {
-		status.Error = fmt.Errorf("git.getStatus: path must be absolute: %s", path)
+	if !core.PathIsAbs(path) {
+		status.Error = coreerr.E("git.getStatus", "path must be absolute: "+path, nil)
 		return status
 	}
 
@@ -91,7 +92,7 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 		status.Error = err
 		return status
 	}
-	status.Branch = strings.TrimSpace(branch)
+	status.Branch = core.Trim(branch)
 
 	// Get porcelain status
 	porcelain, err := gitCommand(ctx, path, "status", "--porcelain")
@@ -139,14 +140,14 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 // isNoUpstreamError reports whether an error is due to a missing tracking branch.
 func isNoUpstreamError(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "no upstream") || strings.Contains(msg, "No upstream")
+	return core.Contains(msg, "no upstream") || core.Contains(msg, "No upstream")
 }
 
 // getAheadBehind returns the number of commits ahead and behind upstream.
 func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err error) {
 	aheadStr, err := gitCommand(ctx, path, "rev-list", "--count", "@{u}..HEAD")
 	if err == nil {
-		ahead, _ = strconv.Atoi(strings.TrimSpace(aheadStr))
+		ahead, _ = strconv.Atoi(core.Trim(aheadStr))
 	} else if isNoUpstreamError(err) {
 		err = nil
 	}
@@ -157,7 +158,7 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 
 	behindStr, err := gitCommand(ctx, path, "rev-list", "--count", "HEAD..@{u}")
 	if err == nil {
-		behind, _ = strconv.Atoi(strings.TrimSpace(behindStr))
+		behind, _ = strconv.Atoi(core.Trim(behindStr))
 	} else if isNoUpstreamError(err) {
 		err = nil
 	}
@@ -183,9 +184,9 @@ func IsNonFastForward(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "non-fast-forward") ||
-		strings.Contains(msg, "fetch first") ||
-		strings.Contains(msg, "tip of your current branch is behind")
+	return core.Contains(msg, "non-fast-forward") ||
+		core.Contains(msg, "fetch first") ||
+		core.Contains(msg, "tip of your current branch is behind")
 }
 
 // gitInteractive runs a git command with terminal attached for user interaction.
@@ -283,16 +284,16 @@ type GitError struct {
 
 // Error returns a descriptive error message.
 func (e *GitError) Error() string {
-	cmd := "git " + strings.Join(e.Args, " ")
-	stderr := strings.TrimSpace(e.Stderr)
+	cmd := "git " + core.Join(" ", e.Args...)
+	stderr := core.Trim(e.Stderr)
 
 	if stderr != "" {
-		return fmt.Sprintf("git command %q failed: %s", cmd, stderr)
+		return core.Sprintf("git command %q failed: %s", cmd, stderr)
 	}
 	if e.Err != nil {
-		return fmt.Sprintf("git command %q failed: %v", cmd, e.Err)
+		return core.Sprintf("git command %q failed: %v", cmd, e.Err)
 	}
-	return fmt.Sprintf("git command %q failed", cmd)
+	return core.Sprintf("git command %q failed", cmd)
 }
 
 // Unwrap returns the underlying error for error chain inspection.

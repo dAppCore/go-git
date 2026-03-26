@@ -3,9 +3,7 @@ package git
 import (
 	"context"
 	"iter"
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 
 	"dappco.re/go/core"
@@ -72,11 +70,50 @@ func NewService(opts ServiceOptions) func(*core.Core) (any, error) {
 	}
 }
 
-// OnStartup registers query and task handlers.
-func (s *Service) OnStartup(ctx context.Context) error {
+// OnStartup registers query and action handlers.
+func (s *Service) OnStartup(ctx context.Context) core.Result {
 	s.Core().RegisterQuery(s.handleQuery)
-	s.Core().RegisterTask(s.handleTask)
-	return nil
+
+	s.Core().Action("git.push", func(ctx context.Context, opts core.Options) core.Result {
+		path := opts.String("path")
+		if err := s.validatePath(path); err != nil {
+			return s.Core().LogError(err, "git.push", "path validation failed")
+		}
+		if err := Push(ctx, path); err != nil {
+			return s.Core().LogError(err, "git.push", "push failed")
+		}
+		return core.Result{OK: true}
+	})
+
+	s.Core().Action("git.pull", func(ctx context.Context, opts core.Options) core.Result {
+		path := opts.String("path")
+		if err := s.validatePath(path); err != nil {
+			return s.Core().LogError(err, "git.pull", "path validation failed")
+		}
+		if err := Pull(ctx, path); err != nil {
+			return s.Core().LogError(err, "git.pull", "pull failed")
+		}
+		return core.Result{OK: true}
+	})
+
+	s.Core().Action("git.push-multiple", func(ctx context.Context, opts core.Options) core.Result {
+		r := opts.Get("paths")
+		paths, _ := r.Value.([]string)
+		r = opts.Get("names")
+		names, _ := r.Value.(map[string]string)
+		for _, path := range paths {
+			if err := s.validatePath(path); err != nil {
+				return s.Core().LogError(err, "git.push-multiple", "path validation failed")
+			}
+		}
+		results, err := PushMultiple(ctx, paths, names)
+		if err != nil {
+			_ = s.Core().LogError(err, "git.push-multiple", "push multiple had failures")
+		}
+		return core.Result{Value: results, OK: true}
+	})
+
+	return core.Result{OK: true}
 }
 
 func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
@@ -108,53 +145,14 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 	return core.Result{}
 }
 
-func (s *Service) handleTask(c *core.Core, t core.Task) core.Result {
-	ctx := context.Background() // TODO: core should pass context to handlers
-
-	switch m := t.(type) {
-	case TaskPush:
-		if err := s.validatePath(m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "path validation failed")
-		}
-		if err := Push(ctx, m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "push failed")
-		}
-		return core.Result{OK: true}
-
-	case TaskPull:
-		if err := s.validatePath(m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "path validation failed")
-		}
-		if err := Pull(ctx, m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "pull failed")
-		}
-		return core.Result{OK: true}
-
-	case TaskPushMultiple:
-		for _, path := range m.Paths {
-			if err := s.validatePath(path); err != nil {
-				return c.LogError(err, "git.handleTask", "path validation failed")
-			}
-		}
-		results, err := PushMultiple(ctx, m.Paths, m.Names)
-		if err != nil {
-			// Log for observability; partial results are still returned.
-			_ = c.LogError(err, "git.handleTask", "push multiple had failures")
-		}
-		return core.Result{Value: results, OK: true}
-	}
-	return core.Result{}
-}
-
 func (s *Service) validatePath(path string) error {
-	if !filepath.IsAbs(path) {
+	if !core.PathIsAbs(path) {
 		return coreerr.E("git.validatePath", "path must be absolute: "+path, nil)
 	}
 
 	workDir := s.opts.WorkDir
 	if workDir != "" {
-		rel, err := filepath.Rel(workDir, path)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if !core.HasPrefix(path, workDir) {
 			return coreerr.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
 		}
 	}
