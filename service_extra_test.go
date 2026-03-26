@@ -2,50 +2,45 @@ package git
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 
+	"dappco.re/go/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"dappco.re/go/core"
 )
 
-// --- validatePath tests ---
-
-func TestService_ValidatePath_Bad_RelativePath(t *testing.T) {
+func TestServiceExtra_ValidatePath_RelativePath_Bad(t *testing.T) {
 	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
+
 	err := svc.validatePath("relative/path")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "path must be absolute")
 }
 
-func TestService_ValidatePath_Bad_OutsideWorkDir(t *testing.T) {
+func TestServiceExtra_ValidatePath_OutsideWorkDir_Bad(t *testing.T) {
 	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
+
 	err := svc.validatePath("/etc/passwd")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
 }
 
-func TestService_ValidatePath_Good_InsideWorkDir(t *testing.T) {
+func TestServiceExtra_ValidatePath_InsideWorkDir_Good(t *testing.T) {
 	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
+
 	err := svc.validatePath("/home/repos/my-project")
 	assert.NoError(t, err)
 }
 
-func TestService_ValidatePath_Good_NoWorkDir(t *testing.T) {
+func TestServiceExtra_ValidatePath_NoWorkDir_Good(t *testing.T) {
 	svc := &Service{opts: ServiceOptions{}}
+
 	err := svc.validatePath("/any/absolute/path")
 	assert.NoError(t, err)
 }
 
-// --- handleQuery path validation ---
-
-func TestService_HandleQuery_Bad_InvalidPath(t *testing.T) {
+func TestServiceExtra_HandleQuery_InvalidPath_Bad(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
@@ -58,11 +53,8 @@ func TestService_HandleQuery_Bad_InvalidPath(t *testing.T) {
 	assert.False(t, result.OK)
 }
 
-// --- handleTask path validation ---
-
-func TestService_HandleTask_Bad_PushInvalidPath(t *testing.T) {
+func TestServiceExtra_HandleTask_PushInvalidPath_Bad(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
@@ -72,9 +64,8 @@ func TestService_HandleTask_Bad_PushInvalidPath(t *testing.T) {
 	assert.False(t, result.OK)
 }
 
-func TestService_HandleTask_Bad_PullInvalidPath(t *testing.T) {
+func TestServiceExtra_HandleTask_PullInvalidPath_Bad(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
@@ -84,9 +75,8 @@ func TestService_HandleTask_Bad_PullInvalidPath(t *testing.T) {
 	assert.False(t, result.OK)
 }
 
-func TestService_HandleTask_Bad_PushMultipleInvalidPath(t *testing.T) {
+func TestServiceExtra_HandleTask_PushMultipleInvalidPath_Bad(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
 		opts:           ServiceOptions{WorkDir: "/home/repos"},
@@ -99,14 +89,12 @@ func TestService_HandleTask_Bad_PushMultipleInvalidPath(t *testing.T) {
 	assert.False(t, result.OK)
 }
 
-func TestNewService_Good(t *testing.T) {
+func TestServiceExtra_NewService_Good(t *testing.T) {
 	opts := ServiceOptions{WorkDir: t.TempDir()}
 	factory := NewService(opts)
 	assert.NotNil(t, factory)
 
-	// Create a minimal Core to test the factory.
 	c := core.New()
-
 	svc, err := factory(c)
 	require.NoError(t, err)
 	assert.NotNil(t, svc)
@@ -116,9 +104,8 @@ func TestNewService_Good(t *testing.T) {
 	assert.NotNil(t, service)
 }
 
-func TestService_OnStartup_Good(t *testing.T) {
+func TestServiceExtra_OnStartup_Good(t *testing.T) {
 	c := core.New()
-
 	opts := ServiceOptions{WorkDir: t.TempDir()}
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, opts),
@@ -129,35 +116,28 @@ func TestService_OnStartup_Good(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestService_HandleQuery_Good_Status(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
+func TestServiceExtra_HandleQuery_Status_Good(t *testing.T) {
+	dir := initTestRepo(t)
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
 
-	// Call handleQuery directly.
 	result := svc.handleQuery(c, QueryStatus{
 		Paths: []string{dir},
 		Names: map[string]string{dir: "test-repo"},
 	})
-
 	assert.True(t, result.OK)
 
 	statuses, ok := result.Value.([]RepoStatus)
 	require.True(t, ok)
 	require.Len(t, statuses, 1)
 	assert.Equal(t, "test-repo", statuses[0].Name)
-
-	// Verify lastStatus was updated.
 	assert.Len(t, svc.lastStatus, 1)
 }
 
-func TestService_HandleQuery_Good_DirtyRepos(t *testing.T) {
+func TestServiceExtra_HandleQuery_DirtyRepos_Good(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 		lastStatus: []RepoStatus{
@@ -175,9 +155,8 @@ func TestService_HandleQuery_Good_DirtyRepos(t *testing.T) {
 	assert.Equal(t, "dirty", dirty[0].Name)
 }
 
-func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
+func TestServiceExtra_HandleQuery_AheadRepos_Good(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 		lastStatus: []RepoStatus{
@@ -195,9 +174,8 @@ func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
 	assert.Equal(t, "ahead", ahead[0].Name)
 }
 
-func TestService_HandleQuery_Bad_UnknownQuery(t *testing.T) {
+func TestServiceExtra_HandleQuery_UnknownQuery_Bad(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
@@ -207,11 +185,9 @@ func TestService_HandleQuery_Bad_UnknownQuery(t *testing.T) {
 	assert.Nil(t, result.Value)
 }
 
-func TestService_HandleTask_Bad_PushNoRemote(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
+func TestServiceExtra_HandleTask_PushNoRemote_Bad(t *testing.T) {
+	dir := initTestRepo(t)
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
@@ -220,11 +196,9 @@ func TestService_HandleTask_Bad_PushNoRemote(t *testing.T) {
 	assert.False(t, result.OK, "push without remote should fail")
 }
 
-func TestService_HandleTask_Bad_PullNoRemote(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
+func TestServiceExtra_HandleTask_PullNoRemote_Bad(t *testing.T) {
+	dir := initTestRepo(t)
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
@@ -233,11 +207,9 @@ func TestService_HandleTask_Bad_PullNoRemote(t *testing.T) {
 	assert.False(t, result.OK, "pull without remote should fail")
 }
 
-func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
+func TestServiceExtra_HandleTask_PushMultiple_Good(t *testing.T) {
+	dir := initTestRepo(t)
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
@@ -246,19 +218,16 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 		Paths: []string{dir},
 		Names: map[string]string{dir: "test"},
 	})
-
-	// PushMultiple returns results even when individual pushes fail.
 	assert.True(t, result.OK)
 
 	results, ok := result.Value.([]PushResult)
 	require.True(t, ok)
 	assert.Len(t, results, 1)
-	assert.False(t, results[0].Success) // No remote
+	assert.False(t, results[0].Success)
 }
 
-func TestService_HandleTask_Bad_UnknownTask(t *testing.T) {
+func TestServiceExtra_HandleTask_UnknownTask_Bad(t *testing.T) {
 	c := core.New()
-
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
@@ -268,11 +237,8 @@ func TestService_HandleTask_Bad_UnknownTask(t *testing.T) {
 	assert.Nil(t, result.Value)
 }
 
-// --- Additional git operation tests ---
-
-func TestGetStatus_Good_AheadBehindNoUpstream(t *testing.T) {
-	// A repo without a tracking branch should return 0 ahead/behind.
-	dir, _ := filepath.Abs(initTestRepo(t))
+func TestServiceExtra_GetStatus_AheadBehindNoUpstream_Good(t *testing.T) {
+	dir := initTestRepo(t)
 
 	status := getStatus(context.Background(), dir, "no-upstream")
 	require.NoError(t, status.Error)
@@ -280,15 +246,15 @@ func TestGetStatus_Good_AheadBehindNoUpstream(t *testing.T) {
 	assert.Equal(t, 0, status.Behind)
 }
 
-func TestPushMultiple_Good_Empty(t *testing.T) {
+func TestServiceExtra_PushMultiple_Empty_Good(t *testing.T) {
 	results, err := PushMultiple(context.Background(), []string{}, map[string]string{})
 	assert.NoError(t, err)
 	assert.Empty(t, results)
 }
 
-func TestPushMultiple_Bad_NoRemote_MultiplePaths(t *testing.T) {
-	dir1, _ := filepath.Abs(initTestRepo(t))
-	dir2, _ := filepath.Abs(initTestRepo(t))
+func TestServiceExtra_PushMultiple_NoRemote_MultiplePaths_Bad(t *testing.T) {
+	dir1 := initTestRepo(t)
+	dir2 := initTestRepo(t)
 
 	results, err := PushMultiple(context.Background(), []string{dir1, dir2}, map[string]string{
 		dir1: "repo-1",
@@ -299,60 +265,44 @@ func TestPushMultiple_Bad_NoRemote_MultiplePaths(t *testing.T) {
 	require.Len(t, results, 2)
 	assert.Equal(t, "repo-1", results[0].Name)
 	assert.Equal(t, "repo-2", results[1].Name)
-	// Both should fail (no remote).
 	assert.False(t, results[0].Success)
 	assert.False(t, results[1].Success)
 }
 
-func TestPush_Good_WithRemote(t *testing.T) {
-	// Create a bare remote and a clone.
-	bareDir, _ := filepath.Abs(t.TempDir())
-	cloneDir, _ := filepath.Abs(t.TempDir())
+func TestServiceExtra_Push_WithRemote_Good(t *testing.T) {
+	bareDir := t.TempDir()
+	cloneDir := t.TempDir()
 
-	cmd := exec.Command("git", "init", "--bare")
-	cmd.Dir = bareDir
-	require.NoError(t, cmd.Run())
-
-	cmd = exec.Command("git", "clone", bareDir, cloneDir)
-	require.NoError(t, cmd.Run())
+	runGit(t, bareDir, "init", "--bare")
+	runGit(t, "", "clone", bareDir, cloneDir)
 
 	for _, args := range [][]string{
-		{"git", "config", "user.email", "test@example.com"},
-		{"git", "config", "user.name", "Test User"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test User"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		require.NoError(t, cmd.Run())
+		runGit(t, cloneDir, args...)
 	}
 
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v1"), 0644))
+	writeTestFile(t, core.JoinPath(cloneDir, "file.txt"), "v1")
 	for _, args := range [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", "initial"},
-		{"git", "push", "origin", "HEAD"},
+		{"add", "."},
+		{"commit", "-m", "initial"},
+		{"push", "origin", "HEAD"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "failed: %v: %s", args, string(out))
+		runGit(t, cloneDir, args...)
 	}
 
-	// Make a local commit.
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v2"), 0644))
+	writeTestFile(t, core.JoinPath(cloneDir, "file.txt"), "v2")
 	for _, args := range [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", "second commit"},
+		{"add", "."},
+		{"commit", "-m", "second commit"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		require.NoError(t, cmd.Run())
+		runGit(t, cloneDir, args...)
 	}
 
-	// Push should succeed.
 	err := Push(context.Background(), cloneDir)
 	assert.NoError(t, err)
 
-	// Verify ahead count is now 0.
 	ahead, behind, err := getAheadBehind(context.Background(), cloneDir)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, ahead)

@@ -5,7 +5,7 @@ description: Internal design of go-git -- types, data flow, concurrency model, a
 
 # Architecture
 
-go-git is split into two layers: a standalone operations layer and a Core framework service layer. The standalone layer has no dependencies beyond the standard library; the service layer adds message-bus integration via the Core DI framework.
+go-git is split into two layers: a standalone operations layer and a Core framework service layer. The standalone layer uses Core primitives for strings, structured errors, and git binary discovery; the service layer adds message-bus integration via the Core DI framework.
 
 ## Key types
 
@@ -42,12 +42,12 @@ All Git command failures are wrapped in `*GitError`, which captures the command 
 ```go
 type GitError struct {
     Args   []string  // Git subcommand and arguments
-    Err    error     // Underlying exec error
+    Err    error     // Underlying process error
     Stderr string    // Captured stderr from the Git process
 }
 ```
 
-`GitError` implements the `error` interface. Its `Error()` method prefers the stderr text when available, falling back to the underlying error. It also implements `Unwrap()` so callers can use `errors.Is` and `errors.As` on the chain.
+`GitError` implements the `error` interface. Its `Error()` method prefers the stderr text when available, falling back to the underlying error. It also implements `Unwrap()` so callers can use `core.Is` and `core.As` on the chain.
 
 ### PushResult
 
@@ -95,7 +95,7 @@ A single file can increment both `Staged` and `Modified` if it has been staged a
 
 ### Interactive push and pull
 
-`Push()` and `Pull()` use `gitInteractive()`, which connects the child process to the terminal's stdin, stdout, and stderr. This is necessary to support SSH passphrase prompts.
+`Push()` and `Pull()` use `gitInteractive()`, which connects the child process to the terminal's stdin and stdout while teeing stderr back to the terminal and into the captured `GitError`. This is necessary to support SSH passphrase prompts without losing structured failure details.
 
 `PushMultiple()` deliberately runs pushes **sequentially** rather than in parallel, because interactive SSH prompts cannot overlap on a single terminal.
 
@@ -179,14 +179,11 @@ All query and task handlers validate paths before execution:
 
 ```go
 func (s *Service) validatePath(path string) error {
-    if !filepath.IsAbs(path) {
+    if !isAbsolutePath(path) {
         return core.E("git.validatePath", "path must be absolute: "+path, nil)
     }
-    if s.opts.WorkDir != "" {
-        rel, err := filepath.Rel(s.opts.WorkDir, path)
-        if err != nil || strings.HasPrefix(rel, "..") {
-            return core.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+s.opts.WorkDir, nil)
-        }
+    if s.opts.WorkDir != "" && !pathWithin(s.opts.WorkDir, path) {
+        return core.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+s.opts.WorkDir, nil)
     }
     return nil
 }

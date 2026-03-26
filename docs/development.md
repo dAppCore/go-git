@@ -20,7 +20,7 @@ go-git is part of the Go workspace at `~/Code/go.work`. If you are working withi
 go test ./... -v
 
 # Single test
-go test -run TestGetStatus_Good_CleanRepo -v
+go test -run TestGit_GetStatus_CleanRepo_Good -v
 
 # With race detector
 go test -race ./...
@@ -47,8 +47,8 @@ Tests follow the `_Good`, `_Bad`, `_Ugly` suffix pattern:
 
 | Suffix | Purpose | Example |
 |--------|---------|---------|
-| `_Good` | Happy path | `TestGetStatus_Good_CleanRepo` |
-| `_Bad` | Expected error conditions | `TestGitCommand_Bad_NotARepo` |
+| `_Good` | Happy path | `TestGit_GetStatus_CleanRepo_Good` |
+| `_Bad` | Expected error conditions | `TestGit_GitCommand_NotARepo_Bad` |
 | `_Ugly` | Panic and edge cases | (none currently) |
 
 ## Formatting and linting
@@ -82,7 +82,7 @@ The `.golangci.yml` enables these linters: `govet`, `errcheck`, `staticcheck`, `
 
 ```
 go-git/
-  git.go                 # Standalone Git operations (stdlib only)
+  git.go                 # Standalone Git operations (Core primitives + syscall runner)
   git_test.go            # Tests for standalone operations
   service.go             # Core framework service integration
   service_test.go        # Service helper/iterator tests
@@ -113,7 +113,7 @@ go-git/
 
 2. If the operation should be available via the Core message bus, define a query or task type in `service.go` and add a case to `handleQuery` or `handleTask`. All paths must pass through `validatePath()`.
 
-3. Write tests using `initTestRepo()` for real Git operations. Follow the `_Good`/`_Bad`/`_Ugly` naming convention.
+3. Write tests using `initTestRepo()` for real Git operations. Follow the `TestFile_Function_..._{Good,Bad,Ugly}` naming convention.
 
 4. Run the full QA suite before submitting:
 

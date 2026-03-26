@@ -36,7 +36,7 @@ func TestService_DirtyRepos_Good(t *testing.T) {
 	assert.Contains(t, names, "dirty-staged")
 }
 
-func TestService_DirtyRepos_Good_NoneFound(t *testing.T) {
+func TestService_DirtyRepos_NoneFound_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "clean1"},
@@ -48,7 +48,7 @@ func TestService_DirtyRepos_Good_NoneFound(t *testing.T) {
 	assert.Empty(t, dirty)
 }
 
-func TestService_DirtyRepos_Good_EmptyStatus(t *testing.T) {
+func TestService_DirtyRepos_EmptyStatus_Good(t *testing.T) {
 	s := &Service{}
 	dirty := s.DirtyRepos()
 	assert.Empty(t, dirty)
@@ -79,7 +79,7 @@ func TestService_AheadRepos_Good(t *testing.T) {
 	assert.Contains(t, names, "ahead-by-five")
 }
 
-func TestService_AheadRepos_Good_NoneFound(t *testing.T) {
+func TestService_AheadRepos_NoneFound_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "synced1"},
@@ -91,7 +91,7 @@ func TestService_AheadRepos_Good_NoneFound(t *testing.T) {
 	assert.Empty(t, ahead)
 }
 
-func TestService_AheadRepos_Good_EmptyStatus(t *testing.T) {
+func TestService_AheadRepos_EmptyStatus_Good(t *testing.T) {
 	s := &Service{}
 	ahead := s.AheadRepos()
 	assert.Empty(t, ahead)
@@ -131,14 +131,14 @@ func TestService_Status_Good(t *testing.T) {
 	assert.Equal(t, expected, s.Status())
 }
 
-func TestService_Status_Good_NilSlice(t *testing.T) {
+func TestService_Status_NilSlice_Good(t *testing.T) {
 	s := &Service{}
 	assert.Nil(t, s.Status())
 }
 
 // --- Query/Task type tests ---
 
-func TestQueryStatus_Good_MapsToStatusOptions(t *testing.T) {
+func TestService_QueryStatus_MapsToStatusOptions_Good(t *testing.T) {
 	q := QueryStatus{
 		Paths: []string{"/path/a", "/path/b"},
 		Names: map[string]string{"/path/a": "repo-a"},
@@ -150,14 +150,14 @@ func TestQueryStatus_Good_MapsToStatusOptions(t *testing.T) {
 	assert.Equal(t, q.Names, opts.Names)
 }
 
-func TestServiceOptions_Good_WorkDir(t *testing.T) {
+func TestService_Options_WorkDir_Good(t *testing.T) {
 	opts := ServiceOptions{WorkDir: "/home/claude/repos"}
 	assert.Equal(t, "/home/claude/repos", opts.WorkDir)
 }
 
 // --- DirtyRepos excludes errored repos ---
 
-func TestService_DirtyRepos_Good_ExcludesErrors(t *testing.T) {
+func TestService_DirtyRepos_ExcludesErrors_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "dirty-ok", Modified: 1},
@@ -172,7 +172,7 @@ func TestService_DirtyRepos_Good_ExcludesErrors(t *testing.T) {
 
 // --- AheadRepos excludes errored repos ---
 
-func TestService_AheadRepos_Good_ExcludesErrors(t *testing.T) {
+func TestService_AheadRepos_ExcludesErrors_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "ahead-ok", Ahead: 2},
