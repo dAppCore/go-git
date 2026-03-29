@@ -266,6 +266,21 @@ func TestGitCommand_Bad_NotARepo(t *testing.T) {
 	}
 }
 
+func TestGitCommand_Bad_RelativePath(t *testing.T) {
+	_, err := gitCommand(context.Background(), "relative/path", "status")
+	assert.Error(t, err)
+}
+
+func TestPush_Bad_RelativePath(t *testing.T) {
+	err := Push(context.Background(), "relative/path")
+	assert.Error(t, err)
+}
+
+func TestPull_Bad_RelativePath(t *testing.T) {
+	err := Pull(context.Background(), "relative/path")
+	assert.Error(t, err)
+}
+
 // --- getStatus integration tests ---
 
 func TestGetStatus_Good_CleanRepo(t *testing.T) {

@@ -29,6 +29,20 @@ func TestService_ValidatePath_Bad_OutsideWorkDir(t *testing.T) {
 	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
 }
 
+func TestService_ValidatePath_Bad_OutsideWorkDirPrefix(t *testing.T) {
+	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
+	err := svc.validatePath("/home/repos2")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside of allowed WorkDir")
+}
+
+func TestService_ValidatePath_Bad_WorkDirNotAbsolute(t *testing.T) {
+	svc := &Service{opts: ServiceOptions{WorkDir: "relative/workdir"}}
+	err := svc.validatePath("/any/absolute/path")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "WorkDir must be absolute")
+}
+
 func TestService_ValidatePath_Good_InsideWorkDir(t *testing.T) {
 	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
 	err := svc.validatePath("/home/repos/my-project")

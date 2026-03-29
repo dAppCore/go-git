@@ -80,9 +80,8 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 		Path: path,
 	}
 
-	// Validate path to prevent directory traversal
-	if !core.PathIsAbs(path) {
-		status.Error = coreerr.E("git.getStatus", "path must be absolute: "+path, nil)
+	if err := requireAbsolutePath("git.getStatus", path); err != nil {
+		status.Error = err
 		return status
 	}
 
@@ -128,8 +127,9 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	// Get ahead/behind counts
 	ahead, behind, err := getAheadBehind(ctx, path)
 	if err != nil {
-		// We don't fail the whole status if ahead/behind fails (might be no upstream)
-		// but we could log it or store it if needed. For now, we just keep 0.
+		// We don't fail the whole status for missing upstream branches.
+		// We do surface other ahead/behind failures on the result.
+		status.Error = err
 	}
 	status.Ahead = ahead
 	status.Behind = behind
@@ -139,15 +139,32 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 
 // isNoUpstreamError reports whether an error is due to a missing tracking branch.
 func isNoUpstreamError(err error) bool {
-	msg := err.Error()
-	return core.Contains(msg, "no upstream") || core.Contains(msg, "No upstream")
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(core.Trim(err.Error()))
+	return strings.Contains(msg, "no upstream")
+}
+
+func requireAbsolutePath(op string, path string) error {
+	if core.PathIsAbs(path) {
+		return nil
+	}
+	return coreerr.E(op, "path must be absolute: "+path, nil)
 }
 
 // getAheadBehind returns the number of commits ahead and behind upstream.
 func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err error) {
+	if err := requireAbsolutePath("git.getAheadBehind", path); err != nil {
+		return 0, 0, err
+	}
+
 	aheadStr, err := gitCommand(ctx, path, "rev-list", "--count", "@{u}..HEAD")
 	if err == nil {
-		ahead, _ = strconv.Atoi(core.Trim(aheadStr))
+		ahead, err = strconv.Atoi(core.Trim(aheadStr))
+		if err != nil {
+			return 0, 0, coreerr.E("git.getAheadBehind", "failed to parse ahead count", err)
+		}
 	} else if isNoUpstreamError(err) {
 		err = nil
 	}
@@ -158,7 +175,10 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 
 	behindStr, err := gitCommand(ctx, path, "rev-list", "--count", "HEAD..@{u}")
 	if err == nil {
-		behind, _ = strconv.Atoi(core.Trim(behindStr))
+		behind, err = strconv.Atoi(core.Trim(behindStr))
+		if err != nil {
+			return 0, 0, coreerr.E("git.getAheadBehind", "failed to parse behind count", err)
+		}
 	} else if isNoUpstreamError(err) {
 		err = nil
 	}
@@ -169,12 +189,18 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 // Push pushes commits for a single repository.
 // Uses interactive mode to support SSH passphrase prompts.
 func Push(ctx context.Context, path string) error {
+	if err := requireAbsolutePath("git.push", path); err != nil {
+		return err
+	}
 	return gitInteractive(ctx, path, "push")
 }
 
 // Pull pulls changes for a single repository.
 // Uses interactive mode to support SSH passphrase prompts.
 func Pull(ctx context.Context, path string) error {
+	if err := requireAbsolutePath("git.pull", path); err != nil {
+		return err
+	}
 	return gitInteractive(ctx, path, "pull", "--rebase")
 }
 
@@ -184,13 +210,18 @@ func IsNonFastForward(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return core.Contains(msg, "non-fast-forward") ||
-		core.Contains(msg, "fetch first") ||
-		core.Contains(msg, "tip of your current branch is behind")
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "non-fast-forward") ||
+		strings.Contains(msg, "fetch first") ||
+		strings.Contains(msg, "tip of your current branch is behind")
 }
 
 // gitInteractive runs a git command with terminal attached for user interaction.
 func gitInteractive(ctx context.Context, dir string, args ...string) error {
+	if err := requireAbsolutePath("git.interactive", dir); err != nil {
+		return err
+	}
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
@@ -254,6 +285,10 @@ func PushMultiple(ctx context.Context, paths []string, names map[string]string) 
 
 // gitCommand runs a git command and returns stdout.
 func gitCommand(ctx context.Context, dir string, args ...string) (string, error) {
+	if err := requireAbsolutePath("git.command", dir); err != nil {
+		return "", err
+	}
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 

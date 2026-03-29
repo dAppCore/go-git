@@ -3,7 +3,9 @@ package git
 import (
 	"context"
 	"iter"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"dappco.re/go/core"
@@ -151,10 +153,17 @@ func (s *Service) validatePath(path string) error {
 	}
 
 	workDir := s.opts.WorkDir
-	if workDir != "" {
-		if !core.HasPrefix(path, workDir) {
-			return coreerr.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
-		}
+	if workDir == "" {
+		return nil
+	}
+
+	workDir = filepath.Clean(workDir)
+	if !core.PathIsAbs(workDir) {
+		return coreerr.E("git.validatePath", "WorkDir must be absolute: "+s.opts.WorkDir, nil)
+	}
+	rel, err := filepath.Rel(workDir, filepath.Clean(path))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return coreerr.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
 	}
 	return nil
 }
