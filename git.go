@@ -53,6 +53,10 @@ type StatusOptions struct {
 }
 
 // Status checks git status for multiple repositories in parallel.
+//
+// Example:
+//
+//	statuses := Status(ctx, StatusOptions{Paths: []string{"/home/user/Code/core/agent"}})
 func Status(ctx context.Context, opts StatusOptions) []RepoStatus {
 	var wg sync.WaitGroup
 	results := make([]RepoStatus, len(opts.Paths))
@@ -187,6 +191,11 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 }
 
 // Push pushes commits for a single repository.
+//
+// Example:
+//
+//	err := Push(ctx, "/home/user/Code/core/agent")
+//
 // Uses interactive mode to support SSH passphrase prompts.
 func Push(ctx context.Context, path string) error {
 	if err := requireAbsolutePath("git.push", path); err != nil {
@@ -196,6 +205,11 @@ func Push(ctx context.Context, path string) error {
 }
 
 // Pull pulls changes for a single repository.
+//
+// Example:
+//
+//	err := Pull(ctx, "/home/user/Code/core/agent")
+//
 // Uses interactive mode to support SSH passphrase prompts.
 func Pull(ctx context.Context, path string) error {
 	if err := requireAbsolutePath("git.pull", path); err != nil {
