@@ -119,7 +119,7 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 }
 
 func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
-	ctx := context.Background() // TODO: core should pass context to handlers
+	ctx := c.Context()
 
 	switch m := q.(type) {
 	case QueryStatus:
