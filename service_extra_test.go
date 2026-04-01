@@ -123,6 +123,23 @@ func TestService_Action_Bad_PushMultipleInvalidPath(t *testing.T) {
 	assert.False(t, result.OK)
 }
 
+func TestService_Action_Bad_PullMultipleInvalidPath(t *testing.T) {
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{WorkDir: "/home/repos"}),
+		opts:           ServiceOptions{WorkDir: "/home/repos"},
+	}
+	svc.OnStartup(context.Background())
+
+	opts := core.NewOptions()
+	opts.Set("paths", []string{"/home/repos/ok", "/etc/bad"})
+	opts.Set("names", map[string]string{})
+	result := c.Action("git.pull-multiple").Run(context.Background(), opts)
+	_ = svc
+	assert.False(t, result.OK)
+}
+
 func TestNewService_Good(t *testing.T) {
 	opts := ServiceOptions{WorkDir: t.TempDir()}
 	factory := NewService(opts)
@@ -416,6 +433,31 @@ func TestService_Action_Good_PushMultiple(t *testing.T) {
 	assert.False(t, results[0].Success) // No remote
 }
 
+func TestService_Action_Good_PullMultiple(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+	}
+	svc.OnStartup(context.Background())
+
+	opts := core.NewOptions()
+	opts.Set("paths", []string{dir})
+	opts.Set("names", map[string]string{dir: "test"})
+	result := c.Action("git.pull-multiple").Run(context.Background(), opts)
+	_ = svc
+
+	assert.True(t, result.OK)
+	results, ok := result.Value.([]PullResult)
+	require.True(t, ok)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "test", results[0].Name)
+	assert.False(t, results[0].Success)
+	assert.Error(t, results[0].Error)
+}
+
 func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
@@ -432,6 +474,29 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 
 	assert.True(t, result.OK)
 	results, ok := result.Value.([]PushResult)
+	require.True(t, ok)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "test", results[0].Name)
+	assert.False(t, results[0].Success)
+	assert.Error(t, results[0].Error)
+}
+
+func TestService_HandleTask_Good_PullMultiple(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+	}
+
+	result := svc.handleTask(c, TaskPullMultiple{
+		Paths: []string{dir},
+		Names: map[string]string{dir: "test"},
+	})
+
+	assert.True(t, result.OK)
+	results, ok := result.Value.([]PullResult)
 	require.True(t, ok)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "test", results[0].Name)

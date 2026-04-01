@@ -98,8 +98,8 @@ func main() {
 
 | File | Purpose |
 |------|---------|
-| `git.go` | Standalone Git operations -- `Status`, `StatusIter`, `Push`, `Pull`, `PushMultiple`, `PushMultipleIter`, error types. Zero framework dependencies. |
-| `service.go` | Core framework integration -- `Service`, query types (`QueryStatus`, `QueryDirtyRepos`, `QueryAheadRepos`, `QueryBehindRepos`), task types (`TaskPush`, `TaskPull`, `TaskPushMultiple`). |
+| `git.go` | Standalone Git operations -- `Status`, `StatusIter`, `Push`, `Pull`, `PushMultiple`, `PushMultipleIter`, `PullMultiple`, `PullMultipleIter`, error types. Zero framework dependencies. |
+| `service.go` | Core framework integration -- `Service`, query types (`QueryStatus`, `QueryDirtyRepos`, `QueryAheadRepos`, `QueryBehindRepos`), task types (`TaskPush`, `TaskPull`, `TaskPushMultiple`, `TaskPullMultiple`). |
 | `git_test.go` | Tests for standalone operations using real temporary Git repositories. |
 | `service_test.go` | Tests for `Service` filtering helpers (`DirtyRepos`, `AheadRepos`, `BehindRepos`, iterators). |
 | `service_extra_test.go` | Integration tests for `Service` query/task handlers against the Core framework. |

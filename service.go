@@ -48,6 +48,12 @@ type TaskPushMultiple struct {
 	Names map[string]string
 }
 
+// TaskPullMultiple requests git pull for multiple paths.
+type TaskPullMultiple struct {
+	Paths []string
+	Names map[string]string
+}
+
 // ServiceOptions for configuring the git service.
 type ServiceOptions struct {
 	WorkDir string
@@ -118,6 +124,23 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 		return core.Result{Value: results, OK: true}
 	})
 
+	s.Core().Action("git.pull-multiple", func(ctx context.Context, opts core.Options) core.Result {
+		r := opts.Get("paths")
+		paths, _ := r.Value.([]string)
+		r = opts.Get("names")
+		names, _ := r.Value.(map[string]string)
+		for _, path := range paths {
+			if err := s.validatePath(path); err != nil {
+				return s.Core().LogError(err, "git.pull-multiple", "path validation failed")
+			}
+		}
+		results, err := PullMultiple(ctx, paths, names)
+		if err != nil {
+			_ = s.Core().LogError(err, "git.pull-multiple", "pull multiple had failures")
+		}
+		return core.Result{Value: results, OK: true}
+	})
+
 	return core.Result{OK: true}
 }
 
@@ -129,6 +152,8 @@ func (s *Service) handleTaskMessage(c *core.Core, msg core.Message) core.Result 
 	case TaskPull:
 		return s.handleTask(c, m)
 	case TaskPushMultiple:
+		return s.handleTask(c, m)
+	case TaskPullMultiple:
 		return s.handleTask(c, m)
 	default:
 		return core.Result{OK: true}
@@ -198,6 +223,19 @@ func (s *Service) handleTask(c *core.Core, t any) core.Result {
 		if err != nil {
 			// Log for observability; partial results are still returned.
 			_ = c.LogError(err, "git.handleTask", "push multiple had failures")
+		}
+		return core.Result{Value: results, OK: true}
+
+	case TaskPullMultiple:
+		for _, path := range m.Paths {
+			if err := s.validatePath(path); err != nil {
+				return c.LogError(err, "git.handleTask", "path validation failed")
+			}
+		}
+		results, err := PullMultiple(ctx, m.Paths, m.Names)
+		if err != nil {
+			// Log for observability; partial results are still returned.
+			_ = c.LogError(err, "git.handleTask", "pull multiple had failures")
 		}
 		return core.Result{Value: results, OK: true}
 	}

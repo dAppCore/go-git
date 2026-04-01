@@ -62,6 +62,19 @@ type PushResult struct {
 }
 ```
 
+### PullResult
+
+Returned by `PullMultiple`, one per repository:
+
+```go
+type PullResult struct {
+    Name    string
+    Path    string
+    Success bool
+    Error   error
+}
+```
+
 ## Data flow
 
 ### Parallel status checking
@@ -161,6 +174,7 @@ statuses := Status(ctx, StatusOptions(queryStatus))
 | `TaskPush` | `nil` | Pushes a single repository (interactive). |
 | `TaskPull` | `nil` | Pulls a single repository with `--rebase` (interactive). |
 | `TaskPushMultiple` | `[]PushResult` | Pushes multiple repositories sequentially. |
+| `TaskPullMultiple` | `[]PullResult` | Pulls multiple repositories sequentially with `--rebase`. |
 
 ### Path validation
 

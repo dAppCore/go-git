@@ -202,6 +202,11 @@ func TestQueryBehindRepos_TypeExists(t *testing.T) {
 	assert.IsType(t, QueryBehindRepos{}, q)
 }
 
+func TestTaskPullMultiple_TypeExists(t *testing.T) {
+	var tpm TaskPullMultiple
+	assert.IsType(t, TaskPullMultiple{}, tpm)
+}
+
 func TestServiceOptions_WorkDir(t *testing.T) {
 	opts := ServiceOptions{WorkDir: "/home/claude/repos"}
 	assert.Equal(t, "/home/claude/repos", opts.WorkDir)

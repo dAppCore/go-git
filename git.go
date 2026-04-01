@@ -295,6 +295,14 @@ type PushResult struct {
 	Error   error
 }
 
+// PullResult represents the result of a pull operation.
+type PullResult struct {
+	Name    string
+	Path    string
+	Success bool
+	Error   error
+}
+
 // PushMultiple pushes multiple repositories sequentially.
 // Sequential because SSH passphrase prompts need user interaction.
 func PushMultiple(ctx context.Context, paths []string, names map[string]string) ([]PushResult, error) {
@@ -328,6 +336,51 @@ func PushMultipleIter(ctx context.Context, paths []string, names map[string]stri
 			if err := requireAbsolutePath("git.pushMultiple", path); err != nil {
 				result.Error = err
 			} else if err := Push(ctx, path); err != nil {
+				result.Error = err
+			} else {
+				result.Success = true
+			}
+
+			if !yield(result) {
+				return
+			}
+		}
+	}
+}
+
+// PullMultiple pulls changes for multiple repositories sequentially.
+// Sequential because interactive terminal I/O needs a single active prompt.
+func PullMultiple(ctx context.Context, paths []string, names map[string]string) ([]PullResult, error) {
+	results := slices.Collect(PullMultipleIter(ctx, paths, names))
+	var lastErr error
+
+	for _, result := range results {
+		if result.Error != nil {
+			lastErr = result.Error
+		}
+	}
+
+	return results, lastErr
+}
+
+// PullMultipleIter pulls changes for multiple repositories sequentially and yields
+// each per-repository result in input order.
+func PullMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PullResult] {
+	return func(yield func(PullResult) bool) {
+		for _, path := range paths {
+			name := names[path]
+			if name == "" {
+				name = path
+			}
+
+			result := PullResult{
+				Name: name,
+				Path: path,
+			}
+
+			if err := requireAbsolutePath("git.pullMultiple", path); err != nil {
+				result.Error = err
+			} else if err := Pull(ctx, path); err != nil {
 				result.Error = err
 			} else {
 				result.Success = true

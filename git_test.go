@@ -549,10 +549,35 @@ func TestPushMultiple_Good_NoRemote(t *testing.T) {
 	assert.Error(t, results[0].Error)
 }
 
+func TestPullMultiple_Good_NoRemote(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	results, err := PullMultiple(context.Background(), []string{dir}, map[string]string{
+		dir: "test-repo",
+	})
+	assert.Error(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, "test-repo", results[0].Name)
+	assert.Equal(t, dir, results[0].Path)
+	assert.False(t, results[0].Success)
+	assert.Error(t, results[0].Error)
+}
+
 func TestPushMultiple_Good_NameFallback(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{})
+	assert.Error(t, err)
+
+	require.Len(t, results, 1)
+	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
+}
+
+func TestPullMultiple_Good_NameFallback(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	results, err := PullMultiple(context.Background(), []string{dir}, map[string]string{})
 	assert.Error(t, err)
 
 	require.Len(t, results, 1)
@@ -570,11 +595,38 @@ func TestPushMultipleIter_Good_NameFallback(t *testing.T) {
 	assert.Error(t, results[0].Error)
 }
 
+func TestPullMultipleIter_Good_NameFallback(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	results := slices.Collect(PullMultipleIter(context.Background(), []string{dir}, map[string]string{}))
+
+	require.Len(t, results, 1)
+	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
+	assert.False(t, results[0].Success)
+	assert.Error(t, results[0].Error)
+}
+
 func TestPushMultiple_Bad_RelativePath(t *testing.T) {
 	validDir, _ := filepath.Abs(initTestRepo(t))
 	relativePath := "relative/repo"
 
 	results, err := PushMultiple(context.Background(), []string{relativePath, validDir}, map[string]string{
+		validDir: "valid-repo",
+	})
+
+	assert.Error(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, relativePath, results[0].Path)
+	assert.Error(t, results[0].Error)
+	assert.Contains(t, results[0].Error.Error(), "path must be absolute")
+	assert.Equal(t, validDir, results[1].Path)
+}
+
+func TestPullMultiple_Bad_RelativePath(t *testing.T) {
+	validDir, _ := filepath.Abs(initTestRepo(t))
+	relativePath := "relative/repo"
+
+	results, err := PullMultiple(context.Background(), []string{relativePath, validDir}, map[string]string{
 		validDir: "valid-repo",
 	})
 
