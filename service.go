@@ -87,24 +87,12 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 
 	s.Core().Action("git.push", func(ctx context.Context, opts core.Options) core.Result {
 		path := opts.String("path")
-		if err := s.validatePath(path); err != nil {
-			return s.Core().LogError(err, "git.push", "path validation failed")
-		}
-		if err := Push(ctx, path); err != nil {
-			return s.Core().LogError(err, "git.push", "push failed")
-		}
-		return core.Result{OK: true}
+		return s.runPush(ctx, path)
 	})
 
 	s.Core().Action("git.pull", func(ctx context.Context, opts core.Options) core.Result {
 		path := opts.String("path")
-		if err := s.validatePath(path); err != nil {
-			return s.Core().LogError(err, "git.pull", "path validation failed")
-		}
-		if err := Pull(ctx, path); err != nil {
-			return s.Core().LogError(err, "git.pull", "pull failed")
-		}
-		return core.Result{OK: true}
+		return s.runPull(ctx, path)
 	})
 
 	s.Core().Action("git.push-multiple", func(ctx context.Context, opts core.Options) core.Result {
@@ -112,16 +100,7 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 		paths, _ := r.Value.([]string)
 		r = opts.Get("names")
 		names, _ := r.Value.(map[string]string)
-		for _, path := range paths {
-			if err := s.validatePath(path); err != nil {
-				return s.Core().LogError(err, "git.push-multiple", "path validation failed")
-			}
-		}
-		results, err := PushMultiple(ctx, paths, names)
-		if err != nil {
-			_ = s.Core().LogError(err, "git.push-multiple", "push multiple had failures")
-		}
-		return core.Result{Value: results, OK: err == nil}
+		return s.runPushMultiple(ctx, paths, names)
 	})
 
 	s.Core().Action("git.pull-multiple", func(ctx context.Context, opts core.Options) core.Result {
@@ -129,16 +108,7 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 		paths, _ := r.Value.([]string)
 		r = opts.Get("names")
 		names, _ := r.Value.(map[string]string)
-		for _, path := range paths {
-			if err := s.validatePath(path); err != nil {
-				return s.Core().LogError(err, "git.pull-multiple", "path validation failed")
-			}
-		}
-		results, err := PullMultiple(ctx, paths, names)
-		if err != nil {
-			_ = s.Core().LogError(err, "git.pull-multiple", "pull multiple had failures")
-		}
-		return core.Result{Value: results, OK: err == nil}
+		return s.runPullMultiple(ctx, paths, names)
 	})
 
 	return core.Result{OK: true}
@@ -156,7 +126,7 @@ func (s *Service) handleTaskMessage(c *core.Core, msg core.Message) core.Result 
 	case TaskPullMultiple:
 		return s.handleTask(c, m)
 	default:
-		return core.Result{}
+		return c.LogError(coreerr.E("git.handleTaskMessage", "unsupported task message type", nil), "git.handleTaskMessage", "unsupported task message type")
 	}
 }
 
@@ -188,7 +158,7 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 	case QueryBehindRepos:
 		return core.Result{Value: s.BehindRepos(), OK: true}
 	}
-	return core.Result{}
+	return c.LogError(coreerr.E("git.handleQuery", "unsupported query type", nil), "git.handleQuery", "unsupported query type")
 }
 
 func (s *Service) handleTask(c *core.Core, t any) core.Result {
@@ -196,51 +166,65 @@ func (s *Service) handleTask(c *core.Core, t any) core.Result {
 
 	switch m := t.(type) {
 	case TaskPush:
-		if err := s.validatePath(m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "path validation failed")
-		}
-		if err := Push(ctx, m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "push failed")
-		}
-		return core.Result{OK: true}
+		return s.runPush(ctx, m.Path)
 
 	case TaskPull:
-		if err := s.validatePath(m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "path validation failed")
-		}
-		if err := Pull(ctx, m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "pull failed")
-		}
-		return core.Result{OK: true}
+		return s.runPull(ctx, m.Path)
 
 	case TaskPushMultiple:
-		for _, path := range m.Paths {
-			if err := s.validatePath(path); err != nil {
-				return c.LogError(err, "git.handleTask", "path validation failed")
-			}
-		}
-		results, err := PushMultiple(ctx, m.Paths, m.Names)
-		if err != nil {
-			// Log for observability; partial results are still returned.
-			_ = c.LogError(err, "git.handleTask", "push multiple had failures")
-		}
-		return core.Result{Value: results, OK: err == nil}
+		return s.runPushMultiple(ctx, m.Paths, m.Names)
 
 	case TaskPullMultiple:
-		for _, path := range m.Paths {
-			if err := s.validatePath(path); err != nil {
-				return c.LogError(err, "git.handleTask", "path validation failed")
-			}
-		}
-		results, err := PullMultiple(ctx, m.Paths, m.Names)
-		if err != nil {
-			// Log for observability; partial results are still returned.
-			_ = c.LogError(err, "git.handleTask", "pull multiple had failures")
-		}
-		return core.Result{Value: results, OK: err == nil}
+		return s.runPullMultiple(ctx, m.Paths, m.Names)
 	}
 
-	return core.Result{}
+	return c.LogError(coreerr.E("git.handleTask", "unsupported task type", nil), "git.handleTask", "unsupported task type")
+}
+
+func (s *Service) runPush(ctx context.Context, path string) core.Result {
+	if err := s.validatePath(path); err != nil {
+		return s.Core().LogError(err, "git.push", "path validation failed")
+	}
+	if err := Push(ctx, path); err != nil {
+		return s.Core().LogError(err, "git.push", "push failed")
+	}
+	return core.Result{OK: true}
+}
+
+func (s *Service) runPull(ctx context.Context, path string) core.Result {
+	if err := s.validatePath(path); err != nil {
+		return s.Core().LogError(err, "git.pull", "path validation failed")
+	}
+	if err := Pull(ctx, path); err != nil {
+		return s.Core().LogError(err, "git.pull", "pull failed")
+	}
+	return core.Result{OK: true}
+}
+
+func (s *Service) runPushMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
+	for _, path := range paths {
+		if err := s.validatePath(path); err != nil {
+			return s.Core().LogError(err, "git.push-multiple", "path validation failed")
+		}
+	}
+	results, err := PushMultiple(ctx, paths, names)
+	if err != nil {
+		_ = s.Core().LogError(err, "git.push-multiple", "push multiple had failures")
+	}
+	return core.Result{Value: results, OK: err == nil}
+}
+
+func (s *Service) runPullMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
+	for _, path := range paths {
+		if err := s.validatePath(path); err != nil {
+			return s.Core().LogError(err, "git.pull-multiple", "path validation failed")
+		}
+	}
+	results, err := PullMultiple(ctx, paths, names)
+	if err != nil {
+		_ = s.Core().LogError(err, "git.pull-multiple", "pull multiple had failures")
+	}
+	return core.Result{Value: results, OK: err == nil}
 }
 
 func (s *Service) validatePath(path string) error {

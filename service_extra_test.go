@@ -316,7 +316,21 @@ func TestService_HandleTaskMessage_Bad_UnknownTask(t *testing.T) {
 
 	result := svc.handleTaskMessage(c, struct{}{})
 	assert.False(t, result.OK)
-	assert.Nil(t, result.Value)
+	assert.Error(t, result.Value.(error))
+	assert.Contains(t, result.Value.(error).Error(), "unsupported task message type")
+}
+
+func TestService_HandleTask_Bad_UnknownTask(t *testing.T) {
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+	}
+
+	result := svc.handleTask(c, struct{}{})
+	assert.False(t, result.OK)
+	assert.Error(t, result.Value.(error))
+	assert.Contains(t, result.Value.(error).Error(), "unsupported task type")
 }
 
 func TestService_Action_Good_TaskPush(t *testing.T) {
@@ -385,7 +399,8 @@ func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
 
 	result := svc.handleQuery(c, "unknown query type")
 	assert.False(t, result.OK)
-	assert.Nil(t, result.Value)
+	assert.Error(t, result.Value.(error))
+	assert.Contains(t, result.Value.(error).Error(), "unsupported query type")
 }
 
 func TestService_Action_Bad_PushNoRemote(t *testing.T) {
