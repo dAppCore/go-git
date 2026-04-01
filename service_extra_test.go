@@ -219,6 +219,26 @@ func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
 	assert.Equal(t, "ahead", ahead[0].Name)
 }
 
+func TestService_HandleQuery_Good_BehindRepos(t *testing.T) {
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+		lastStatus: []RepoStatus{
+			{Name: "synced"},
+			{Name: "behind", Behind: 2},
+		},
+	}
+
+	result := svc.handleQuery(c, QueryBehindRepos{})
+	assert.True(t, result.OK)
+
+	behind, ok := result.Value.([]RepoStatus)
+	require.True(t, ok)
+	assert.Len(t, behind, 1)
+	assert.Equal(t, "behind", behind[0].Name)
+}
+
 func TestService_HandleQuery_Good_TaskPush(t *testing.T) {
 	bareDir, _ := filepath.Abs(t.TempDir())
 	cloneDir, _ := filepath.Abs(t.TempDir())

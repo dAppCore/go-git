@@ -26,6 +26,9 @@ type QueryDirtyRepos struct{}
 // QueryAheadRepos requests repos with unpushed commits.
 type QueryAheadRepos struct{}
 
+// QueryBehindRepos requests repos with unpulled commits.
+type QueryBehindRepos struct{}
+
 // Tasks for git service
 
 // TaskPush requests git push for a path.
@@ -143,6 +146,8 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 
 	case QueryAheadRepos:
 		return core.Result{Value: s.AheadRepos(), OK: true}
+	case QueryBehindRepos:
+		return core.Result{Value: s.BehindRepos(), OK: true}
 	case TaskPush, TaskPull, TaskPushMultiple:
 		return s.handleTask(c, m)
 	}
@@ -250,6 +255,11 @@ func (s *Service) Ahead() iter.Seq[RepoStatus] {
 	return s.filteredIter(func(st RepoStatus) bool { return st.HasUnpushed() })
 }
 
+// Behind returns an iterator over repos with unpulled commits.
+func (s *Service) Behind() iter.Seq[RepoStatus] {
+	return s.filteredIter(func(st RepoStatus) bool { return st.HasUnpulled() })
+}
+
 // DirtyRepos returns repos with uncommitted changes.
 func (s *Service) DirtyRepos() []RepoStatus {
 	return slices.Collect(s.Dirty())
@@ -258,4 +268,9 @@ func (s *Service) DirtyRepos() []RepoStatus {
 // AheadRepos returns repos with unpushed commits.
 func (s *Service) AheadRepos() []RepoStatus {
 	return slices.Collect(s.Ahead())
+}
+
+// BehindRepos returns repos with unpulled commits.
+func (s *Service) BehindRepos() []RepoStatus {
+	return slices.Collect(s.Behind())
 }

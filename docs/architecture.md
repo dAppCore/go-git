@@ -146,6 +146,7 @@ func (s *Service) OnStartup(ctx context.Context) error {
 | `QueryStatus` | `[]RepoStatus` | Checks Git status for a set of paths (runs in parallel). Updates the cached `lastStatus`. |
 | `QueryDirtyRepos` | `[]RepoStatus` | Filters `lastStatus` for repos with uncommitted changes. |
 | `QueryAheadRepos` | `[]RepoStatus` | Filters `lastStatus` for repos with unpushed commits. |
+| `QueryBehindRepos` | `[]RepoStatus` | Filters `lastStatus` for repos with unpulled commits. |
 
 `QueryStatus` has the same fields as `StatusOptions` and can be type-converted directly:
 
@@ -193,10 +194,12 @@ The `Service` caches the most recent `QueryStatus` result in `lastStatus` (prote
 | `All()` | `iter.Seq[RepoStatus]` | Iterator over all cached statuses. |
 | `Dirty()` | `iter.Seq[RepoStatus]` | Iterator over repos where `IsDirty()` is true and `Error` is nil. |
 | `Ahead()` | `iter.Seq[RepoStatus]` | Iterator over repos where `HasUnpushed()` is true and `Error` is nil. |
+| `Behind()` | `iter.Seq[RepoStatus]` | Iterator over repos where `HasUnpulled()` is true and `Error` is nil. |
 | `DirtyRepos()` | `[]RepoStatus` | Collects `Dirty()` into a slice. |
 | `AheadRepos()` | `[]RepoStatus` | Collects `Ahead()` into a slice. |
+| `BehindRepos()` | `[]RepoStatus` | Collects `Behind()` into a slice. |
 
-Errored repositories are excluded from `Dirty()` and `Ahead()` iterators.
+Errored repositories are excluded from `Dirty()`, `Ahead()`, and `Behind()` iterators.
 
 ## Concurrency model
 

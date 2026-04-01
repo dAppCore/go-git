@@ -97,6 +97,49 @@ func TestService_AheadRepos_Good_EmptyStatus(t *testing.T) {
 	assert.Empty(t, ahead)
 }
 
+func TestService_BehindRepos_Good(t *testing.T) {
+	s := &Service{
+		lastStatus: []RepoStatus{
+			{Name: "synced", Behind: 0},
+			{Name: "behind-by-one", Behind: 1},
+			{Name: "behind-by-five", Behind: 5},
+			{Name: "ahead-only", Ahead: 3},
+			{Name: "errored-behind", Behind: 2, Error: assert.AnError},
+		},
+	}
+
+	behind := s.BehindRepos()
+	assert.Len(t, behind, 2)
+
+	names := slices.Collect(func(yield func(string) bool) {
+		for _, b := range behind {
+			if !yield(b.Name) {
+				return
+			}
+		}
+	})
+	assert.Contains(t, names, "behind-by-one")
+	assert.Contains(t, names, "behind-by-five")
+}
+
+func TestService_BehindRepos_Good_NoneFound(t *testing.T) {
+	s := &Service{
+		lastStatus: []RepoStatus{
+			{Name: "synced1"},
+			{Name: "synced2"},
+		},
+	}
+
+	behind := s.BehindRepos()
+	assert.Empty(t, behind)
+}
+
+func TestService_BehindRepos_Good_EmptyStatus(t *testing.T) {
+	s := &Service{}
+	behind := s.BehindRepos()
+	assert.Empty(t, behind)
+}
+
 func TestService_Iterators_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
@@ -119,6 +162,10 @@ func TestService_Iterators_Good(t *testing.T) {
 	ahead := slices.Collect(s.Ahead())
 	assert.Len(t, ahead, 1)
 	assert.Equal(t, "ahead", ahead[0].Name)
+
+	// Test Behind()
+	behind := slices.Collect(s.Behind())
+	assert.Len(t, behind, 0)
 }
 
 func TestService_Status_Good(t *testing.T) {
@@ -148,6 +195,11 @@ func TestQueryStatus_MapsToStatusOptions(t *testing.T) {
 	opts := StatusOptions(q)
 	assert.Equal(t, q.Paths, opts.Paths)
 	assert.Equal(t, q.Names, opts.Names)
+}
+
+func TestQueryBehindRepos_TypeExists(t *testing.T) {
+	var q QueryBehindRepos
+	assert.IsType(t, QueryBehindRepos{}, q)
 }
 
 func TestServiceOptions_WorkDir(t *testing.T) {
@@ -183,4 +235,19 @@ func TestService_AheadRepos_Good_ExcludesErrors(t *testing.T) {
 	ahead := s.AheadRepos()
 	assert.Len(t, ahead, 1)
 	assert.Equal(t, "ahead-ok", ahead[0].Name)
+}
+
+// --- BehindRepos excludes errored repos ---
+
+func TestService_BehindRepos_Good_ExcludesErrors(t *testing.T) {
+	s := &Service{
+		lastStatus: []RepoStatus{
+			{Name: "behind-ok", Behind: 2},
+			{Name: "behind-error", Behind: 3, Error: assert.AnError},
+		},
+	}
+
+	behind := s.BehindRepos()
+	assert.Len(t, behind, 1)
+	assert.Equal(t, "behind-ok", behind[0].Name)
 }
