@@ -537,6 +537,22 @@ func TestPushMultiple_Good_NameFallback(t *testing.T) {
 	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
 }
 
+func TestPushMultiple_Bad_RelativePath(t *testing.T) {
+	validDir, _ := filepath.Abs(initTestRepo(t))
+	relativePath := "relative/repo"
+
+	results, err := PushMultiple(context.Background(), []string{relativePath, validDir}, map[string]string{
+		validDir: "valid-repo",
+	})
+
+	assert.Error(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, relativePath, results[0].Path)
+	assert.Error(t, results[0].Error)
+	assert.Contains(t, results[0].Error.Error(), "path must be absolute")
+	assert.Equal(t, validDir, results[1].Path)
+}
+
 // --- Pull tests ---
 
 func TestPull_Bad_NoRemote(t *testing.T) {

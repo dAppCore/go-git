@@ -300,6 +300,13 @@ func PushMultiple(ctx context.Context, paths []string, names map[string]string) 
 			Path: path,
 		}
 
+		if err := requireAbsolutePath("git.pushMultiple", path); err != nil {
+			result.Error = err
+			lastErr = err
+			results[i] = result
+			continue
+		}
+
 		err := Push(ctx, path)
 		if err != nil {
 			result.Error = err
