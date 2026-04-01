@@ -162,8 +162,6 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 		return core.Result{Value: s.AheadRepos(), OK: true}
 	case QueryBehindRepos:
 		return core.Result{Value: s.BehindRepos(), OK: true}
-	case TaskPush, TaskPull, TaskPushMultiple:
-		return s.handleTask(c, m)
 	}
 	return core.Result{}
 }

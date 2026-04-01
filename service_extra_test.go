@@ -239,7 +239,7 @@ func TestService_HandleQuery_Good_BehindRepos(t *testing.T) {
 	assert.Equal(t, "behind", behind[0].Name)
 }
 
-func TestService_HandleQuery_Good_TaskPush(t *testing.T) {
+func TestService_HandleTaskMessage_Good_TaskPush(t *testing.T) {
 	bareDir, _ := filepath.Abs(t.TempDir())
 	cloneDir, _ := filepath.Abs(t.TempDir())
 
@@ -285,9 +285,8 @@ func TestService_HandleQuery_Good_TaskPush(t *testing.T) {
 	svc := &Service{
 		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
 	}
-	svc.OnStartup(context.Background())
 
-	result := c.Query(TaskPush{Path: cloneDir})
+	result := svc.handleTaskMessage(c, TaskPush{Path: cloneDir})
 	assert.True(t, result.OK)
 }
 
