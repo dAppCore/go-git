@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	core "dappco.re/go/core"
@@ -471,6 +472,27 @@ func TestStatus_Good_MultipleRepos(t *testing.T) {
 	assert.True(t, results[1].IsDirty())
 }
 
+func TestStatusIter_Good_MultipleRepos(t *testing.T) {
+	dir1, _ := filepath.Abs(initTestRepo(t))
+	dir2, _ := filepath.Abs(initTestRepo(t))
+
+	require.NoError(t, os.WriteFile(core.JoinPath(dir2, "extra.txt"), []byte("extra"), 0644))
+
+	statuses := slices.Collect(StatusIter(context.Background(), StatusOptions{
+		Paths: []string{dir1, dir2},
+		Names: map[string]string{
+			dir1: "clean-repo",
+			dir2: "dirty-repo",
+		},
+	}))
+
+	require.Len(t, statuses, 2)
+	assert.Equal(t, "clean-repo", statuses[0].Name)
+	assert.Equal(t, "dirty-repo", statuses[1].Name)
+	assert.False(t, statuses[0].IsDirty())
+	assert.True(t, statuses[1].IsDirty())
+}
+
 func TestStatus_Good_EmptyPaths(t *testing.T) {
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{},
@@ -535,6 +557,17 @@ func TestPushMultiple_Good_NameFallback(t *testing.T) {
 
 	require.Len(t, results, 1)
 	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
+}
+
+func TestPushMultipleIter_Good_NameFallback(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	results := slices.Collect(PushMultipleIter(context.Background(), []string{dir}, map[string]string{}))
+
+	require.Len(t, results, 1)
+	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
+	assert.False(t, results[0].Success)
+	assert.Error(t, results[0].Error)
 }
 
 func TestPushMultiple_Bad_RelativePath(t *testing.T) {

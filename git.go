@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	goio "io"
+	"iter"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -56,23 +58,35 @@ type StatusOptions struct {
 //
 //	statuses := Status(ctx, StatusOptions{Paths: []string{"/home/user/Code/core/agent"}})
 func Status(ctx context.Context, opts StatusOptions) []RepoStatus {
-	var wg sync.WaitGroup
-	results := make([]RepoStatus, len(opts.Paths))
+	return slices.Collect(StatusIter(ctx, opts))
+}
 
-	for i, path := range opts.Paths {
-		wg.Add(1)
-		go func(idx int, repoPath string) {
-			defer wg.Done()
-			name := opts.Names[repoPath]
-			if name == "" {
-				name = repoPath
+// StatusIter checks git status for multiple repositories in parallel and yields
+// the results in input order.
+func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
+	return func(yield func(RepoStatus) bool) {
+		var wg sync.WaitGroup
+		results := make([]RepoStatus, len(opts.Paths))
+
+		for i, path := range opts.Paths {
+			wg.Add(1)
+			go func(idx int, repoPath string) {
+				defer wg.Done()
+				name := opts.Names[repoPath]
+				if name == "" {
+					name = repoPath
+				}
+				results[idx] = getStatus(ctx, repoPath, name)
+			}(i, path)
+		}
+
+		wg.Wait()
+		for _, result := range results {
+			if !yield(result) {
+				return
 			}
-			results[idx] = getStatus(ctx, repoPath, name)
-		}(i, path)
+		}
 	}
-
-	wg.Wait()
-	return results
 }
 
 // getStatus gets the git status for a single repository.
@@ -284,39 +298,46 @@ type PushResult struct {
 // PushMultiple pushes multiple repositories sequentially.
 // Sequential because SSH passphrase prompts need user interaction.
 func PushMultiple(ctx context.Context, paths []string, names map[string]string) ([]PushResult, error) {
-	results := make([]PushResult, len(paths))
+	results := slices.Collect(PushMultipleIter(ctx, paths, names))
 	var lastErr error
 
-	for i, path := range paths {
-		name := names[path]
-		if name == "" {
-			name = path
+	for _, result := range results {
+		if result.Error != nil {
+			lastErr = result.Error
 		}
-
-		result := PushResult{
-			Name: name,
-			Path: path,
-		}
-
-		if err := requireAbsolutePath("git.pushMultiple", path); err != nil {
-			result.Error = err
-			lastErr = err
-			results[i] = result
-			continue
-		}
-
-		err := Push(ctx, path)
-		if err != nil {
-			result.Error = err
-			lastErr = err
-		} else {
-			result.Success = true
-		}
-
-		results[i] = result
 	}
 
 	return results, lastErr
+}
+
+// PushMultipleIter pushes multiple repositories sequentially and yields each
+// per-repository result in input order.
+func PushMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PushResult] {
+	return func(yield func(PushResult) bool) {
+		for _, path := range paths {
+			name := names[path]
+			if name == "" {
+				name = path
+			}
+
+			result := PushResult{
+				Name: name,
+				Path: path,
+			}
+
+			if err := requireAbsolutePath("git.pushMultiple", path); err != nil {
+				result.Error = err
+			} else if err := Push(ctx, path); err != nil {
+				result.Error = err
+			} else {
+				result.Success = true
+			}
+
+			if !yield(result) {
+				return
+			}
+		}
+	}
 }
 
 // gitCommand runs a git command and returns stdout.
