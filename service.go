@@ -135,11 +135,8 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 
 	switch m := q.(type) {
 	case QueryStatus:
-		// Validate all paths before execution
-		for _, path := range m.Paths {
-			if err := s.validatePath(path); err != nil {
-				return c.LogError(err, "git.handleQuery", "path validation failed")
-			}
+		if err := s.validatePaths(m.Paths); err != nil {
+			return c.LogError(err, "git.handleQuery", "path validation failed")
 		}
 
 		statuses := Status(ctx, StatusOptions(m))
@@ -202,10 +199,8 @@ func (s *Service) runPull(ctx context.Context, path string) core.Result {
 }
 
 func (s *Service) runPushMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
-	for _, path := range paths {
-		if err := s.validatePath(path); err != nil {
-			return s.Core().LogError(err, "git.push-multiple", "path validation failed")
-		}
+	if err := s.validatePaths(paths); err != nil {
+		return s.Core().LogError(err, "git.push-multiple", "path validation failed")
 	}
 	results, err := PushMultiple(ctx, paths, names)
 	if err != nil {
@@ -215,10 +210,8 @@ func (s *Service) runPushMultiple(ctx context.Context, paths []string, names map
 }
 
 func (s *Service) runPullMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
-	for _, path := range paths {
-		if err := s.validatePath(path); err != nil {
-			return s.Core().LogError(err, "git.pull-multiple", "path validation failed")
-		}
+	if err := s.validatePaths(paths); err != nil {
+		return s.Core().LogError(err, "git.pull-multiple", "path validation failed")
 	}
 	results, err := PullMultiple(ctx, paths, names)
 	if err != nil {
@@ -244,6 +237,15 @@ func (s *Service) validatePath(path string) error {
 	rel, err := filepath.Rel(workDir, filepath.Clean(path))
 	if err != nil || rel == ".." || core.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return coreerr.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
+	}
+	return nil
+}
+
+func (s *Service) validatePaths(paths []string) error {
+	for _, path := range paths {
+		if err := s.validatePath(path); err != nil {
+			return err
+		}
 	}
 	return nil
 }
