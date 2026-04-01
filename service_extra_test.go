@@ -219,6 +219,58 @@ func TestService_HandleQuery_Good_AheadRepos(t *testing.T) {
 	assert.Equal(t, "ahead", ahead[0].Name)
 }
 
+func TestService_HandleQuery_Good_TaskPush(t *testing.T) {
+	bareDir, _ := filepath.Abs(t.TempDir())
+	cloneDir, _ := filepath.Abs(t.TempDir())
+
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = bareDir
+	require.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "clone", bareDir, cloneDir)
+	require.NoError(t, cmd.Run())
+
+	for _, args := range [][]string{
+		{"git", "config", "user.email", "test@example.com"},
+		{"git", "config", "user.name", "Test User"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = cloneDir
+		require.NoError(t, cmd.Run())
+	}
+
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v1"), 0644))
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial"},
+		{"git", "push", "origin", "HEAD"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = cloneDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "command %v failed: %s", args, string(out))
+	}
+
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v2"), 0644))
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "second commit"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = cloneDir
+		require.NoError(t, cmd.Run())
+	}
+
+	c := core.New()
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+	}
+	svc.OnStartup(context.Background())
+
+	result := c.Query(TaskPush{Path: cloneDir})
+	assert.True(t, result.OK)
+}
+
 func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
 	c := core.New()
 
@@ -286,6 +338,29 @@ func TestService_Action_Good_PushMultiple(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, results, 1)
 	assert.False(t, results[0].Success) // No remote
+}
+
+func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+	}
+
+	result := svc.handleTask(c, TaskPushMultiple{
+		Paths: []string{dir},
+		Names: map[string]string{dir: "test"},
+	})
+
+	assert.True(t, result.OK)
+	results, ok := result.Value.([]PushResult)
+	require.True(t, ok)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "test", results[0].Name)
+	assert.False(t, results[0].Success)
+	assert.Error(t, results[0].Error)
 }
 
 // --- Additional git operation tests ---
