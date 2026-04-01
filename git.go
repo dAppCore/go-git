@@ -118,12 +118,12 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 		}
 
 		// Staged (index has changes)
-		if slices.Contains([]byte{'A', 'D', 'R', 'M'}, x) {
+		if slices.Contains([]byte{'A', 'C', 'D', 'R', 'M', 'T'}, x) {
 			status.Staged++
 		}
 
 		// Modified in working tree
-		if slices.Contains([]byte{'M', 'D'}, y) {
+		if slices.Contains([]byte{'M', 'D', 'T'}, y) {
 			status.Modified++
 		}
 	}

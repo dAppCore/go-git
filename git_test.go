@@ -589,3 +589,33 @@ func TestGetStatus_Good_RenamedFile(t *testing.T) {
 	assert.Equal(t, 1, status.Staged, "rename should count as staged")
 	assert.True(t, status.IsDirty())
 }
+
+func TestGetStatus_Good_TypeChangedFile_WorkingTree(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	// Replace the tracked file with a symlink to trigger a working-tree type change.
+	require.NoError(t, os.Remove(core.JoinPath(dir, "README.md")))
+	require.NoError(t, os.Symlink("/etc/hosts", core.JoinPath(dir, "README.md")))
+
+	status := getStatus(context.Background(), dir, "typechanged-working-tree")
+	require.NoError(t, status.Error)
+	assert.Equal(t, 1, status.Modified, "type change in working tree counts as modified")
+	assert.True(t, status.IsDirty())
+}
+
+func TestGetStatus_Good_TypeChangedFile_Staged(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	// Stage a type change by replacing the tracked file with a symlink and adding it.
+	require.NoError(t, os.Remove(core.JoinPath(dir, "README.md")))
+	require.NoError(t, os.Symlink("/etc/hosts", core.JoinPath(dir, "README.md")))
+
+	cmd := exec.Command("git", "add", "README.md")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+
+	status := getStatus(context.Background(), dir, "typechanged-staged")
+	require.NoError(t, status.Error)
+	assert.Equal(t, 1, status.Staged, "type change in the index counts as staged")
+	assert.True(t, status.IsDirty())
+}
