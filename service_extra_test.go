@@ -291,6 +291,63 @@ func TestService_HandleQuery_Good_TaskPush(t *testing.T) {
 	assert.True(t, result.OK)
 }
 
+func TestService_Action_Good_TaskPush(t *testing.T) {
+	bareDir, _ := filepath.Abs(t.TempDir())
+	cloneDir, _ := filepath.Abs(t.TempDir())
+
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = bareDir
+	require.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "clone", bareDir, cloneDir)
+	require.NoError(t, cmd.Run())
+
+	for _, args := range [][]string{
+		{"git", "config", "user.email", "test@example.com"},
+		{"git", "config", "user.name", "Test User"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = cloneDir
+		require.NoError(t, cmd.Run())
+	}
+
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v1"), 0644))
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial"},
+		{"git", "push", "origin", "HEAD"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = cloneDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "command %v failed: %s", args, string(out))
+	}
+
+	require.NoError(t, os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v2"), 0644))
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "second commit"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = cloneDir
+		require.NoError(t, cmd.Run())
+	}
+
+	c := core.New()
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+	}
+	svc.OnStartup(context.Background())
+
+	result := c.ACTION(TaskPush{Path: cloneDir})
+	assert.True(t, result.OK)
+
+	ahead, behind, err := getAheadBehind(context.Background(), cloneDir)
+	require.NoError(t, err)
+	assert.Equal(t, 0, ahead)
+	assert.Equal(t, 0, behind)
+}
+
 func TestService_HandleQuery_Good_UnknownQuery(t *testing.T) {
 	c := core.New()
 

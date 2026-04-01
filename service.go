@@ -78,6 +78,7 @@ func NewService(opts ServiceOptions) func(*core.Core) (any, error) {
 // OnStartup registers query and action handlers.
 func (s *Service) OnStartup(ctx context.Context) core.Result {
 	s.Core().RegisterQuery(s.handleQuery)
+	s.Core().RegisterAction(s.handleTaskMessage)
 
 	s.Core().Action("git.push", func(ctx context.Context, opts core.Options) core.Result {
 		path := opts.String("path")
@@ -119,6 +120,20 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 	})
 
 	return core.Result{OK: true}
+}
+
+// handleTaskMessage bridges task structs onto the Core action bus.
+func (s *Service) handleTaskMessage(c *core.Core, msg core.Message) core.Result {
+	switch m := msg.(type) {
+	case TaskPush:
+		return s.handleTask(c, m)
+	case TaskPull:
+		return s.handleTask(c, m)
+	case TaskPushMultiple:
+		return s.handleTask(c, m)
+	default:
+		return core.Result{OK: true}
+	}
 }
 
 func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
