@@ -88,10 +88,10 @@ The `--porcelain` output is parsed character by character. Each line has a two-c
 | Position X (index) | Position Y (working tree) | Interpretation |
 |---------------------|---------------------------|----------------|
 | `?` | `?` | Untracked file |
-| `A`, `D`, `R`, `M` | any | Staged change |
-| any | `M`, `D` | Working tree modification |
+| `A`, `D`, `R`, `M`, `U` | any | Staged change |
+| any | `M`, `D`, `U` | Working tree modification |
 
-A single file can increment both `Staged` and `Modified` if it has been staged and then further modified.
+A single file can increment both `Staged` and `Modified` if it has been staged and then further modified. Unmerged paths (`U`) increment both counters, which keeps conflicted repositories visibly dirty.
 
 ### Interactive push and pull
 

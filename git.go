@@ -7,7 +7,6 @@ import (
 	goio "io"
 	"os"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,12 +117,12 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 		}
 
 		// Staged (index has changes)
-		if slices.Contains([]byte{'A', 'C', 'D', 'R', 'M', 'T'}, x) {
+		if isStagedStatus(x) {
 			status.Staged++
 		}
 
 		// Modified in working tree
-		if slices.Contains([]byte{'M', 'D', 'T'}, y) {
+		if isModifiedStatus(y) {
 			status.Modified++
 		}
 	}
@@ -139,6 +138,24 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	status.Behind = behind
 
 	return status
+}
+
+func isStagedStatus(ch byte) bool {
+	switch ch {
+	case 'A', 'C', 'D', 'R', 'M', 'T', 'U':
+		return true
+	default:
+		return false
+	}
+}
+
+func isModifiedStatus(ch byte) bool {
+	switch ch {
+	case 'M', 'D', 'T', 'U':
+		return true
+	default:
+		return false
+	}
 }
 
 // isNoUpstreamError reports whether an error is due to a missing tracking branch.

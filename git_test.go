@@ -382,6 +382,54 @@ func TestGetStatus_Good_StagedDeletion(t *testing.T) {
 	assert.True(t, status.IsDirty())
 }
 
+func TestGetStatus_Good_MergeConflict(t *testing.T) {
+	dir, _ := filepath.Abs(initTestRepo(t))
+
+	// Create a conflicting change on a feature branch.
+	cmd := exec.Command("git", "checkout", "-b", "feature")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Feature\n"), 0644))
+	for _, args := range [][]string{
+		{"git", "add", "README.md"},
+		{"git", "commit", "-m", "feature change"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to run %v: %s", args, string(out))
+	}
+
+	// Return to the original branch and create a divergent change.
+	cmd = exec.Command("git", "checkout", "-")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+
+	require.NoError(t, os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Main\n"), 0644))
+	for _, args := range [][]string{
+		{"git", "add", "README.md"},
+		{"git", "commit", "-m", "main change"},
+	} {
+		cmd = exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to run %v: %s", args, string(out))
+	}
+
+	cmd = exec.Command("git", "merge", "feature")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.Error(t, err, "expected the merge to conflict")
+	assert.Contains(t, string(out), "CONFLICT")
+
+	status := getStatus(context.Background(), dir, "conflicted-repo")
+	require.NoError(t, status.Error)
+	assert.Equal(t, 1, status.Staged, "unmerged paths count as staged")
+	assert.Equal(t, 1, status.Modified, "unmerged paths count as modified")
+	assert.True(t, status.IsDirty())
+}
+
 func TestGetStatus_Bad_InvalidPath(t *testing.T) {
 	status := getStatus(context.Background(), "/nonexistent/path", "bad-repo")
 	assert.Error(t, status.Error)
