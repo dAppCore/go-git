@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync"
 
 	core "dappco.re/go/core"
@@ -104,7 +103,7 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	}
 
 	// Parse status output
-	for line := range strings.SplitSeq(porcelain, "\n") {
+	for _, line := range core.Split(porcelain, "\n") {
 		if len(line) < 2 {
 			continue
 		}
@@ -163,8 +162,8 @@ func isNoUpstreamError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(core.Trim(err.Error()))
-	return strings.Contains(msg, "no upstream")
+	msg := core.Lower(core.Trim(err.Error()))
+	return core.Contains(msg, "no upstream")
 }
 
 func requireAbsolutePath(op string, path string) error {
@@ -240,11 +239,10 @@ func IsNonFastForward(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	msg = strings.ToLower(msg)
-	return strings.Contains(msg, "non-fast-forward") ||
-		strings.Contains(msg, "fetch first") ||
-		strings.Contains(msg, "tip of your current branch is behind")
+	msg := core.Lower(err.Error())
+	return core.Contains(msg, "non-fast-forward") ||
+		core.Contains(msg, "fetch first") ||
+		core.Contains(msg, "tip of your current branch is behind")
 }
 
 // gitInteractive runs a git command with terminal attached for user interaction.
