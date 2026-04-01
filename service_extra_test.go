@@ -307,6 +307,18 @@ func TestService_HandleTaskMessage_Good_TaskPush(t *testing.T) {
 	assert.True(t, result.OK)
 }
 
+func TestService_HandleTaskMessage_Bad_UnknownTask(t *testing.T) {
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+	}
+
+	result := svc.handleTaskMessage(c, struct{}{})
+	assert.False(t, result.OK)
+	assert.Nil(t, result.Value)
+}
+
 func TestService_Action_Good_TaskPush(t *testing.T) {
 	bareDir, _ := filepath.Abs(t.TempDir())
 	cloneDir, _ := filepath.Abs(t.TempDir())
@@ -424,8 +436,9 @@ func TestService_Action_Good_PushMultiple(t *testing.T) {
 	result := c.Action("git.push-multiple").Run(context.Background(), opts)
 	_ = svc
 
-	// PushMultiple returns results even when individual pushes fail.
-	assert.True(t, result.OK)
+	// PushMultiple returns results even when individual pushes fail, but the
+	// overall action should still report failure.
+	assert.False(t, result.OK)
 
 	results, ok := result.Value.([]PushResult)
 	require.True(t, ok)
@@ -449,7 +462,7 @@ func TestService_Action_Good_PullMultiple(t *testing.T) {
 	result := c.Action("git.pull-multiple").Run(context.Background(), opts)
 	_ = svc
 
-	assert.True(t, result.OK)
+	assert.False(t, result.OK)
 	results, ok := result.Value.([]PullResult)
 	require.True(t, ok)
 	assert.Len(t, results, 1)
@@ -472,7 +485,7 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 		Names: map[string]string{dir: "test"},
 	})
 
-	assert.True(t, result.OK)
+	assert.False(t, result.OK)
 	results, ok := result.Value.([]PushResult)
 	require.True(t, ok)
 	assert.Len(t, results, 1)
@@ -495,7 +508,7 @@ func TestService_HandleTask_Good_PullMultiple(t *testing.T) {
 		Names: map[string]string{dir: "test"},
 	})
 
-	assert.True(t, result.OK)
+	assert.False(t, result.OK)
 	results, ok := result.Value.([]PullResult)
 	require.True(t, ok)
 	assert.Len(t, results, 1)
