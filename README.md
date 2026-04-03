@@ -6,6 +6,8 @@
 
 Go module: `forge.lthn.ai/core/go-git`
 
+Agent index: [`llms.txt`](llms.txt)
+
 ## License
 
 [EUPL-1.2](LICENSE.md)
