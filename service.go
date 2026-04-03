@@ -70,6 +70,13 @@ type Service struct {
 	lastStatus []RepoStatus
 }
 
+const (
+	actionGitPush         = "git.push"
+	actionGitPull         = "git.pull"
+	actionGitPushMultiple = "git.push-multiple"
+	actionGitPullMultiple = "git.pull-multiple"
+)
+
 // NewService creates a git service factory.
 func NewService(opts ServiceOptions) func(*core.Core) (any, error) {
 	return func(c *core.Core) (any, error) {
@@ -85,17 +92,17 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 	s.Core().RegisterQuery(s.handleQuery)
 	s.Core().RegisterAction(s.handleTaskMessage)
 
-	s.Core().Action("git.push", func(ctx context.Context, opts core.Options) core.Result {
+	s.Core().Action(actionGitPush, func(ctx context.Context, opts core.Options) core.Result {
 		path := opts.String("path")
 		return s.runPush(ctx, path)
 	})
 
-	s.Core().Action("git.pull", func(ctx context.Context, opts core.Options) core.Result {
+	s.Core().Action(actionGitPull, func(ctx context.Context, opts core.Options) core.Result {
 		path := opts.String("path")
 		return s.runPull(ctx, path)
 	})
 
-	s.Core().Action("git.push-multiple", func(ctx context.Context, opts core.Options) core.Result {
+	s.Core().Action(actionGitPushMultiple, func(ctx context.Context, opts core.Options) core.Result {
 		r := opts.Get("paths")
 		paths, _ := r.Value.([]string)
 		r = opts.Get("names")
@@ -103,7 +110,7 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 		return s.runPushMultiple(ctx, paths, names)
 	})
 
-	s.Core().Action("git.pull-multiple", func(ctx context.Context, opts core.Options) core.Result {
+	s.Core().Action(actionGitPullMultiple, func(ctx context.Context, opts core.Options) core.Result {
 		r := opts.Get("paths")
 		paths, _ := r.Value.([]string)
 		r = opts.Get("names")

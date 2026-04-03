@@ -61,6 +61,18 @@ func Status(ctx context.Context, opts StatusOptions) []RepoStatus {
 	return slices.Collect(StatusIter(ctx, opts))
 }
 
+func repoName(path string, names map[string]string) string {
+	if names == nil {
+		return path
+	}
+
+	name := names[path]
+	if name == "" {
+		return path
+	}
+	return name
+}
+
 // StatusIter checks git status for multiple repositories in parallel and yields
 // the results in input order.
 func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
@@ -72,10 +84,7 @@ func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
 			wg.Add(1)
 			go func(idx int, repoPath string) {
 				defer wg.Done()
-				name := opts.Names[repoPath]
-				if name == "" {
-					name = repoPath
-				}
+				name := repoName(repoPath, opts.Names)
 				results[idx] = getStatus(ctx, repoPath, name)
 			}(i, path)
 		}
@@ -327,10 +336,7 @@ func PushMultiple(ctx context.Context, paths []string, names map[string]string) 
 func PushMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PushResult] {
 	return func(yield func(PushResult) bool) {
 		for _, path := range paths {
-			name := names[path]
-			if name == "" {
-				name = path
-			}
+			name := repoName(path, names)
 
 			result := PushResult{
 				Name: name,
@@ -372,10 +378,7 @@ func PullMultiple(ctx context.Context, paths []string, names map[string]string) 
 func PullMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PullResult] {
 	return func(yield func(PullResult) bool) {
 		for _, path := range paths {
-			name := names[path]
-			if name == "" {
-				name = path
-			}
+			name := repoName(path, names)
 
 			result := PullResult{
 				Name: name,
