@@ -1,4 +1,4 @@
-module forge.lthn.ai/core/go-git
+module dappco.re/go/core/git
 
 go 1.26.0
 
