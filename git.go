@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 func withBackground(ctx context.Context) context.Context {
@@ -85,22 +84,40 @@ func repoName(path string, names map[string]string) string {
 func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
 	ctx = withBackground(ctx)
 	return func(yield func(RepoStatus) bool) {
-		var wg sync.WaitGroup
-		results := make([]RepoStatus, len(opts.Paths))
+		type indexedStatus struct {
+			idx int
+			st  RepoStatus
+		}
 
+		if len(opts.Paths) == 0 {
+			return
+		}
+
+		results := make(chan indexedStatus, len(opts.Paths))
 		for i, path := range opts.Paths {
-			wg.Add(1)
 			go func(idx int, repoPath string) {
-				defer wg.Done()
 				name := repoName(repoPath, opts.Names)
-				results[idx] = getStatus(ctx, repoPath, name)
+				results <- indexedStatus{
+					idx: idx,
+					st:  getStatus(ctx, repoPath, name),
+				}
 			}(i, path)
 		}
 
-		wg.Wait()
-		for _, result := range results {
-			if !yield(result) {
-				return
+		statuses := make([]RepoStatus, len(opts.Paths))
+		ready := make([]bool, len(opts.Paths))
+		next := 0
+
+		for received := 0; received < len(opts.Paths); received++ {
+			result := <-results
+			statuses[result.idx] = result.st
+			ready[result.idx] = true
+
+			for next < len(statuses) && ready[next] {
+				if !yield(statuses[next]) {
+					return
+				}
+				next++
 			}
 		}
 	}
