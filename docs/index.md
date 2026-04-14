@@ -5,7 +5,7 @@ description: Multi-repository Git operations library for Go with parallel status
 
 # go-git
 
-**Module:** `forge.lthn.ai/core/go-git`
+**Module:** `dappco.re/go/git`
 
 **Go version:** 1.26+
 
@@ -13,7 +13,7 @@ description: Multi-repository Git operations library for Go with parallel status
 
 ## What it does
 
-go-git is a Go library for orchestrating Git operations across multiple repositories. It was extracted from `forge.lthn.ai/core/go-scm/git/` into a standalone module.
+go-git is a Go library for orchestrating Git operations across multiple repositories. It was extracted from `dappco.re/go/core/scm/git/` into a standalone module.
 
 The library provides two layers:
 
@@ -33,7 +33,7 @@ import (
     "context"
     "fmt"
 
-    git "forge.lthn.ai/core/go-git"
+    git "dappco.re/go/git"
 )
 
 func main() {
@@ -64,8 +64,8 @@ package main
 import (
     "fmt"
 
-    "forge.lthn.ai/core/go/pkg/core"
-    git "forge.lthn.ai/core/go-git"
+    "dappco.re/go/core"
+    git "dappco.re/go/git"
 )
 
 func main() {

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Multi-repository git operations library. Parallel status checks, sequential push/pull (for SSH passphrase prompts), error handling with stderr capture.
 
-**Module:** `forge.lthn.ai/core/go-git`
+**Module:** `dappco.re/go/git`
 **Go:** 1.26+
 
 ## Build & Test

@@ -133,7 +133,7 @@ func (s *Service) handleTaskMessage(c *core.Core, msg core.Message) core.Result 
 	case TaskPullMultiple:
 		return s.handleTask(c, m)
 	default:
-		return c.LogError(coreerr.E("git.handleTaskMessage", "unsupported task message type", nil), "git.handleTaskMessage", "unsupported task message type")
+		return core.Result{}
 	}
 }
 
@@ -162,7 +162,7 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 	case QueryBehindRepos:
 		return core.Result{Value: s.BehindRepos(), OK: true}
 	}
-	return c.LogError(coreerr.E("git.handleQuery", "unsupported query type", nil), "git.handleQuery", "unsupported query type")
+	return core.Result{}
 }
 
 func (s *Service) handleTask(c *core.Core, t any) core.Result {

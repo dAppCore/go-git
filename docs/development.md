@@ -11,7 +11,7 @@ description: How to build, test, lint, and contribute to go-git.
 - **Git** (system binary -- the library shells out to `git`)
 - **golangci-lint** (for linting)
 
-go-git is part of the Go workspace at `~/Code/go.work`. If you are working within that workspace, module resolution is handled automatically. Otherwise, ensure `GOPRIVATE=forge.lthn.ai/*` is set so Go can fetch private modules.
+go-git is part of the Go workspace at `~/Code/go.work`. If you are working within that workspace, module resolution is handled automatically. Otherwise, ensure `GOPRIVATE=dappco.re/*` is set so Go can fetch private modules.
 
 ## Running tests
 

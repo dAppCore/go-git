@@ -1,6 +1,6 @@
 # go-git
 
-Module: `forge.lthn.ai/core/go-git`
+Module: `dappco.re/go/git`
 Purpose: Multi-repository Git operations library with standalone helpers and Core service integration.
 
 ## Entry Points

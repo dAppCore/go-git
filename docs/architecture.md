@@ -142,13 +142,13 @@ The factory constructs a `Service` embedding `core.ServiceRuntime[ServiceOptions
 
 ### Lifecycle
 
-`Service` implements the `Startable` interface. On startup, it registers a query handler and a task handler with the Core message bus:
+`Service` implements the `Startable` interface. On startup, it registers a query handler and a broadcast action handler with the Core message bus:
 
 ```go
-func (s *Service) OnStartup(ctx context.Context) error {
+func (s *Service) OnStartup(ctx context.Context) core.Result {
     s.Core().RegisterQuery(s.handleQuery)
-    s.Core().RegisterTask(s.handleTask)
-    return nil
+    s.Core().RegisterAction(s.handleTaskMessage)
+    return core.Result{OK: true}
 }
 ```
 

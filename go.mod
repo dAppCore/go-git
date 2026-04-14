@@ -1,4 +1,4 @@
-module dappco.re/go/core/git
+module dappco.re/go/git
 
 go 1.26.0
 
