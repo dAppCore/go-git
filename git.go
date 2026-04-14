@@ -4,8 +4,8 @@ package git
 import (
 	"bytes"
 	"context"
-	goio "io"
 	"fmt"
+	goio "io"
 	"iter"
 	"os"
 	"os/exec"
@@ -15,6 +15,13 @@ import (
 	"strings"
 	"sync"
 )
+
+func withBackground(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
 
 // RepoStatus represents the git status of a single repository.
 type RepoStatus struct {
@@ -58,7 +65,7 @@ type StatusOptions struct {
 //
 //	statuses := Status(ctx, StatusOptions{Paths: []string{"/home/user/Code/core/agent"}})
 func Status(ctx context.Context, opts StatusOptions) []RepoStatus {
-	return slices.Collect(StatusIter(ctx, opts))
+	return slices.Collect(StatusIter(withBackground(ctx), opts))
 }
 
 func repoName(path string, names map[string]string) string {
@@ -76,6 +83,7 @@ func repoName(path string, names map[string]string) string {
 // StatusIter checks git status for multiple repositories in parallel and yields
 // the results in input order.
 func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
+	ctx = withBackground(ctx)
 	return func(yield func(RepoStatus) bool) {
 		var wg sync.WaitGroup
 		results := make([]RepoStatus, len(opts.Paths))
@@ -100,6 +108,7 @@ func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
 
 // getStatus gets the git status for a single repository.
 func getStatus(ctx context.Context, path, name string) RepoStatus {
+	ctx = withBackground(ctx)
 	status := RepoStatus{
 		Name: name,
 		Path: path,
@@ -202,6 +211,7 @@ func requireAbsolutePath(op string, path string) error {
 
 // getAheadBehind returns the number of commits ahead and behind upstream.
 func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err error) {
+	ctx = withBackground(ctx)
 	if err := requireAbsolutePath("git.getAheadBehind", path); err != nil {
 		return 0, 0, err
 	}
@@ -241,6 +251,7 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 //
 // Uses interactive mode to support SSH passphrase prompts.
 func Push(ctx context.Context, path string) error {
+	ctx = withBackground(ctx)
 	if err := requireAbsolutePath("git.push", path); err != nil {
 		return err
 	}
@@ -255,6 +266,7 @@ func Push(ctx context.Context, path string) error {
 //
 // Uses interactive mode to support SSH passphrase prompts.
 func Pull(ctx context.Context, path string) error {
+	ctx = withBackground(ctx)
 	if err := requireAbsolutePath("git.pull", path); err != nil {
 		return err
 	}
@@ -274,6 +286,7 @@ func IsNonFastForward(err error) bool {
 
 // gitInteractive runs a git command with terminal attached for user interaction.
 func gitInteractive(ctx context.Context, dir string, args ...string) error {
+	ctx = withBackground(ctx)
 	if err := requireAbsolutePath("git.interactive", dir); err != nil {
 		return err
 	}
@@ -319,7 +332,7 @@ type PullResult struct {
 // PushMultiple pushes multiple repositories sequentially.
 // Sequential because SSH passphrase prompts need user interaction.
 func PushMultiple(ctx context.Context, paths []string, names map[string]string) ([]PushResult, error) {
-	results := slices.Collect(PushMultipleIter(ctx, paths, names))
+	results := slices.Collect(PushMultipleIter(withBackground(ctx), paths, names))
 	var lastErr error
 
 	for _, result := range results {
@@ -334,6 +347,7 @@ func PushMultiple(ctx context.Context, paths []string, names map[string]string) 
 // PushMultipleIter pushes multiple repositories sequentially and yields each
 // per-repository result in input order.
 func PushMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PushResult] {
+	ctx = withBackground(ctx)
 	return func(yield func(PushResult) bool) {
 		for _, path := range paths {
 			name := repoName(path, names)
@@ -361,7 +375,7 @@ func PushMultipleIter(ctx context.Context, paths []string, names map[string]stri
 // PullMultiple pulls changes for multiple repositories sequentially.
 // Sequential because interactive terminal I/O needs a single active prompt.
 func PullMultiple(ctx context.Context, paths []string, names map[string]string) ([]PullResult, error) {
-	results := slices.Collect(PullMultipleIter(ctx, paths, names))
+	results := slices.Collect(PullMultipleIter(withBackground(ctx), paths, names))
 	var lastErr error
 
 	for _, result := range results {
@@ -376,6 +390,7 @@ func PullMultiple(ctx context.Context, paths []string, names map[string]string) 
 // PullMultipleIter pulls changes for multiple repositories sequentially and yields
 // each per-repository result in input order.
 func PullMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PullResult] {
+	ctx = withBackground(ctx)
 	return func(yield func(PullResult) bool) {
 		for _, path := range paths {
 			name := repoName(path, names)
@@ -402,6 +417,7 @@ func PullMultipleIter(ctx context.Context, paths []string, names map[string]stri
 
 // gitCommand runs a git command and returns stdout.
 func gitCommand(ctx context.Context, dir string, args ...string) (string, error) {
+	ctx = withBackground(ctx)
 	if err := requireAbsolutePath("git.command", dir); err != nil {
 		return "", err
 	}

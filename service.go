@@ -228,7 +228,7 @@ func (s *Service) runPullMultiple(ctx context.Context, paths []string, names map
 }
 
 func (s *Service) validatePath(path string) error {
-	if !core.PathIsAbs(path) {
+	if !filepath.IsAbs(path) {
 		return coreerr.E("git.validatePath", "path must be absolute: "+path, nil)
 	}
 
@@ -238,7 +238,7 @@ func (s *Service) validatePath(path string) error {
 	}
 
 	workDir = filepath.Clean(workDir)
-	if !core.PathIsAbs(workDir) {
+	if !filepath.IsAbs(workDir) {
 		return coreerr.E("git.validatePath", "WorkDir must be absolute: "+s.opts.WorkDir, nil)
 	}
 	rel, err := filepath.Rel(workDir, filepath.Clean(path))
