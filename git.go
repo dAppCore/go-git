@@ -2,17 +2,17 @@
 package git
 
 import (
-	"bytes"
-	"context"
-	"fmt"
-	goio "io"
-	"iter"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"slices"
-	"strconv"
-	"strings"
+	"bytes"         // Note: intrinsic — command output buffering for git stdout/stderr; no core equivalent
+	"context"       // Note: intrinsic — cancellation propagation for git subprocesses and iterators; no core equivalent
+	"fmt"           // Note: intrinsic — error and GitError message formatting; no core equivalent
+	goio "io"       // Note: intrinsic — stderr teeing while preserving captured output; no core equivalent
+	"iter"          // Note: intrinsic — public lazy sequence API for repository operations; no core equivalent
+	"os"            // Note: intrinsic — interactive git subprocess standard streams; no core equivalent
+	"os/exec"       // Note: intrinsic — executing the git CLI for repository operations; no core equivalent
+	"path/filepath" // Note: intrinsic — absolute path validation for local repositories; no core equivalent
+	"slices"        // Note: intrinsic — collecting and cloning iterator-backed result slices; no core equivalent
+	"strconv"       // Note: intrinsic — parsing ahead/behind counts from git output; no core equivalent
+	"strings"       // Note: intrinsic — parsing and normalizing git command output; no core equivalent
 )
 
 func withBackground(ctx context.Context) context.Context {
