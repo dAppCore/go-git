@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"dappco.re/go/core"
-	coreerr "dappco.re/go/core/log"
+	coreerr "dappco.re/go/log"
 )
 
 // Queries for git service
