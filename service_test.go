@@ -1,10 +1,10 @@
 package git
 
 import (
+	"errors"
+	"reflect"
 	"slices"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // --- Service helper method tests ---
@@ -17,12 +17,14 @@ func TestService_DirtyRepos_Good(t *testing.T) {
 			{Name: "dirty-modified", Modified: 2},
 			{Name: "dirty-untracked", Untracked: 1},
 			{Name: "dirty-staged", Staged: 3},
-			{Name: "errored", Modified: 5, Error: assert.AnError},
+			{Name: "errored", Modified: 5, Error: errors.New("test error")},
 		},
 	}
 
 	dirty := s.DirtyRepos()
-	assert.Len(t, dirty, 3)
+	if len(dirty) != 3 {
+		t.Fatalf("want %v, got %v", 3, len(dirty))
+	}
 
 	names := slices.Collect(func(yield func(string) bool) {
 		for _, d := range dirty {
@@ -31,9 +33,15 @@ func TestService_DirtyRepos_Good(t *testing.T) {
 			}
 		}
 	})
-	assert.Contains(t, names, "dirty-modified")
-	assert.Contains(t, names, "dirty-untracked")
-	assert.Contains(t, names, "dirty-staged")
+	if !slices.Contains(names, "dirty-modified") {
+		t.Fatalf("expected %v to contain %v", names, "dirty-modified")
+	}
+	if !slices.Contains(names, "dirty-untracked") {
+		t.Fatalf("expected %v to contain %v", names, "dirty-untracked")
+	}
+	if !slices.Contains(names, "dirty-staged") {
+		t.Fatalf("expected %v to contain %v", names, "dirty-staged")
+	}
 }
 
 func TestService_DirtyRepos_Good_NoneFound(t *testing.T) {
@@ -45,13 +53,17 @@ func TestService_DirtyRepos_Good_NoneFound(t *testing.T) {
 	}
 
 	dirty := s.DirtyRepos()
-	assert.Empty(t, dirty)
+	if len(dirty) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(dirty))
+	}
 }
 
 func TestService_DirtyRepos_Good_EmptyStatus(t *testing.T) {
 	s := &Service{}
 	dirty := s.DirtyRepos()
-	assert.Empty(t, dirty)
+	if len(dirty) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(dirty))
+	}
 }
 
 func TestService_AheadRepos_Good(t *testing.T) {
@@ -61,12 +73,14 @@ func TestService_AheadRepos_Good(t *testing.T) {
 			{Name: "ahead-by-one", Ahead: 1},
 			{Name: "ahead-by-five", Ahead: 5},
 			{Name: "behind-only", Behind: 3},
-			{Name: "errored-ahead", Ahead: 2, Error: assert.AnError},
+			{Name: "errored-ahead", Ahead: 2, Error: errors.New("test error")},
 		},
 	}
 
 	ahead := s.AheadRepos()
-	assert.Len(t, ahead, 2)
+	if len(ahead) != 2 {
+		t.Fatalf("want %v, got %v", 2, len(ahead))
+	}
 
 	names := slices.Collect(func(yield func(string) bool) {
 		for _, a := range ahead {
@@ -75,8 +89,12 @@ func TestService_AheadRepos_Good(t *testing.T) {
 			}
 		}
 	})
-	assert.Contains(t, names, "ahead-by-one")
-	assert.Contains(t, names, "ahead-by-five")
+	if !slices.Contains(names, "ahead-by-one") {
+		t.Fatalf("expected %v to contain %v", names, "ahead-by-one")
+	}
+	if !slices.Contains(names, "ahead-by-five") {
+		t.Fatalf("expected %v to contain %v", names, "ahead-by-five")
+	}
 }
 
 func TestService_AheadRepos_Good_NoneFound(t *testing.T) {
@@ -88,13 +106,17 @@ func TestService_AheadRepos_Good_NoneFound(t *testing.T) {
 	}
 
 	ahead := s.AheadRepos()
-	assert.Empty(t, ahead)
+	if len(ahead) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(ahead))
+	}
 }
 
 func TestService_AheadRepos_Good_EmptyStatus(t *testing.T) {
 	s := &Service{}
 	ahead := s.AheadRepos()
-	assert.Empty(t, ahead)
+	if len(ahead) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(ahead))
+	}
 }
 
 func TestService_BehindRepos_Good(t *testing.T) {
@@ -104,12 +126,14 @@ func TestService_BehindRepos_Good(t *testing.T) {
 			{Name: "behind-by-one", Behind: 1},
 			{Name: "behind-by-five", Behind: 5},
 			{Name: "ahead-only", Ahead: 3},
-			{Name: "errored-behind", Behind: 2, Error: assert.AnError},
+			{Name: "errored-behind", Behind: 2, Error: errors.New("test error")},
 		},
 	}
 
 	behind := s.BehindRepos()
-	assert.Len(t, behind, 2)
+	if len(behind) != 2 {
+		t.Fatalf("want %v, got %v", 2, len(behind))
+	}
 
 	names := slices.Collect(func(yield func(string) bool) {
 		for _, b := range behind {
@@ -118,8 +142,12 @@ func TestService_BehindRepos_Good(t *testing.T) {
 			}
 		}
 	})
-	assert.Contains(t, names, "behind-by-one")
-	assert.Contains(t, names, "behind-by-five")
+	if !slices.Contains(names, "behind-by-one") {
+		t.Fatalf("expected %v to contain %v", names, "behind-by-one")
+	}
+	if !slices.Contains(names, "behind-by-five") {
+		t.Fatalf("expected %v to contain %v", names, "behind-by-five")
+	}
 }
 
 func TestService_BehindRepos_Good_NoneFound(t *testing.T) {
@@ -131,13 +159,17 @@ func TestService_BehindRepos_Good_NoneFound(t *testing.T) {
 	}
 
 	behind := s.BehindRepos()
-	assert.Empty(t, behind)
+	if len(behind) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(behind))
+	}
 }
 
 func TestService_BehindRepos_Good_EmptyStatus(t *testing.T) {
 	s := &Service{}
 	behind := s.BehindRepos()
-	assert.Empty(t, behind)
+	if len(behind) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(behind))
+	}
 }
 
 func TestService_Iterators_Good(t *testing.T) {
@@ -151,21 +183,33 @@ func TestService_Iterators_Good(t *testing.T) {
 
 	// Test All()
 	all := slices.Collect(s.All())
-	assert.Len(t, all, 3)
+	if len(all) != 3 {
+		t.Fatalf("want %v, got %v", 3, len(all))
+	}
 
 	// Test Dirty()
 	dirty := slices.Collect(s.Dirty())
-	assert.Len(t, dirty, 1)
-	assert.Equal(t, "dirty", dirty[0].Name)
+	if len(dirty) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(dirty))
+	}
+	if "dirty" != dirty[0].Name {
+		t.Fatalf("want %v, got %v", "dirty", dirty[0].Name)
+	}
 
 	// Test Ahead()
 	ahead := slices.Collect(s.Ahead())
-	assert.Len(t, ahead, 1)
-	assert.Equal(t, "ahead", ahead[0].Name)
+	if len(ahead) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(ahead))
+	}
+	if "ahead" != ahead[0].Name {
+		t.Fatalf("want %v, got %v", "ahead", ahead[0].Name)
+	}
 
 	// Test Behind()
 	behind := slices.Collect(s.Behind())
-	assert.Len(t, behind, 0)
+	if len(behind) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(behind))
+	}
 }
 
 func TestService_Status_Good(t *testing.T) {
@@ -175,12 +219,16 @@ func TestService_Status_Good(t *testing.T) {
 	}
 	s := &Service{lastStatus: expected}
 
-	assert.Equal(t, expected, s.Status())
+	if got := s.Status(); !reflect.DeepEqual(expected, got) {
+		t.Fatalf("want %v, got %v", expected, got)
+	}
 }
 
 func TestService_Status_Good_NilSlice(t *testing.T) {
 	s := &Service{}
-	assert.Nil(t, s.Status())
+	if got := s.Status(); got != nil {
+		t.Fatalf("expected nil, got %v", got)
+	}
 }
 
 // --- Query/Task type tests ---
@@ -193,23 +241,33 @@ func TestQueryStatus_MapsToStatusOptions(t *testing.T) {
 
 	// QueryStatus can be cast directly to StatusOptions.
 	opts := StatusOptions(q)
-	assert.Equal(t, q.Paths, opts.Paths)
-	assert.Equal(t, q.Names, opts.Names)
+	if !slices.Equal(q.Paths, opts.Paths) {
+		t.Fatalf("want %v, got %v", q.Paths, opts.Paths)
+	}
+	if !reflect.DeepEqual(q.Names, opts.Names) {
+		t.Fatalf("want %v, got %v", q.Names, opts.Names)
+	}
 }
 
 func TestQueryBehindRepos_TypeExists(t *testing.T) {
 	var q QueryBehindRepos
-	assert.IsType(t, QueryBehindRepos{}, q)
+	if reflect.TypeOf(QueryBehindRepos{}) != reflect.TypeOf(q) {
+		t.Fatalf("want %T, got %T", QueryBehindRepos{}, q)
+	}
 }
 
 func TestTaskPullMultiple_TypeExists(t *testing.T) {
 	var tpm TaskPullMultiple
-	assert.IsType(t, TaskPullMultiple{}, tpm)
+	if reflect.TypeOf(TaskPullMultiple{}) != reflect.TypeOf(tpm) {
+		t.Fatalf("want %T, got %T", TaskPullMultiple{}, tpm)
+	}
 }
 
 func TestServiceOptions_WorkDir(t *testing.T) {
 	opts := ServiceOptions{WorkDir: "/home/claude/repos"}
-	assert.Equal(t, "/home/claude/repos", opts.WorkDir)
+	if "/home/claude/repos" != opts.WorkDir {
+		t.Fatalf("want %v, got %v", "/home/claude/repos", opts.WorkDir)
+	}
 }
 
 // --- DirtyRepos excludes errored repos ---
@@ -218,13 +276,17 @@ func TestService_DirtyRepos_Good_ExcludesErrors(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "dirty-ok", Modified: 1},
-			{Name: "dirty-error", Modified: 1, Error: assert.AnError},
+			{Name: "dirty-error", Modified: 1, Error: errors.New("test error")},
 		},
 	}
 
 	dirty := s.DirtyRepos()
-	assert.Len(t, dirty, 1)
-	assert.Equal(t, "dirty-ok", dirty[0].Name)
+	if len(dirty) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(dirty))
+	}
+	if "dirty-ok" != dirty[0].Name {
+		t.Fatalf("want %v, got %v", "dirty-ok", dirty[0].Name)
+	}
 }
 
 // --- AheadRepos excludes errored repos ---
@@ -233,13 +295,17 @@ func TestService_AheadRepos_Good_ExcludesErrors(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "ahead-ok", Ahead: 2},
-			{Name: "ahead-error", Ahead: 3, Error: assert.AnError},
+			{Name: "ahead-error", Ahead: 3, Error: errors.New("test error")},
 		},
 	}
 
 	ahead := s.AheadRepos()
-	assert.Len(t, ahead, 1)
-	assert.Equal(t, "ahead-ok", ahead[0].Name)
+	if len(ahead) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(ahead))
+	}
+	if "ahead-ok" != ahead[0].Name {
+		t.Fatalf("want %v, got %v", "ahead-ok", ahead[0].Name)
+	}
 }
 
 // --- BehindRepos excludes errored repos ---
@@ -248,11 +314,15 @@ func TestService_BehindRepos_Good_ExcludesErrors(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "behind-ok", Behind: 2},
-			{Name: "behind-error", Behind: 3, Error: assert.AnError},
+			{Name: "behind-error", Behind: 3, Error: errors.New("test error")},
 		},
 	}
 
 	behind := s.BehindRepos()
-	assert.Len(t, behind, 1)
-	assert.Equal(t, "behind-ok", behind[0].Name)
+	if len(behind) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(behind))
+	}
+	if "behind-ok" != behind[0].Name {
+		t.Fatalf("want %v, got %v", "behind-ok", behind[0].Name)
+	}
 }
