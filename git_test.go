@@ -2,10 +2,7 @@ package git
 
 import (
 	"context"
-	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"os/exec" // Note: test-only intrinsic - drives git CLI fixtures for repository setup.
 	"slices"
 	"strings"
 	"testing"
@@ -13,42 +10,91 @@ import (
 	core "dappco.re/go/core"
 )
 
+func testFS() *core.Fs {
+	return (&core.Fs{}).New("/")
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if r := testFS().Write(path, content); !r.OK {
+		t.Fatalf("unexpected error: %v", r.Value)
+	}
+}
+
+func deleteTestPath(t *testing.T, path string) {
+	t.Helper()
+	if r := testFS().Delete(path); !r.OK {
+		t.Fatalf("unexpected error: %v", r.Value)
+	}
+}
+
+func gitTestOutput(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}
+
+func runTestGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	out, err := gitTestOutput(dir, args...)
+	if err != nil {
+		t.Fatalf("failed to run git %v: %s: %v", args, string(out), err)
+	}
+}
+
+func gitHashObject(t *testing.T, dir, content string) string {
+	t.Helper()
+	cmd := exec.Command("git", "hash-object", "-w", "--stdin")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(content)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to hash git object: %s: %v", string(out), err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func stageSymlink(t *testing.T, dir, path, target string) {
+	t.Helper()
+	blob := gitHashObject(t, dir, target)
+	runTestGit(t, dir, "update-index", "--cacheinfo", "120000", blob, path)
+}
+
+func checkoutSymlink(t *testing.T, dir, path, target string) {
+	t.Helper()
+	deleteTestPath(t, core.JoinPath(dir, path))
+	stageSymlink(t, dir, path, target)
+	runTestGit(t, dir, "checkout-index", "-f", path)
+}
+
+func replaceWorkingTreeWithSymlink(t *testing.T, dir, path, target string) {
+	t.Helper()
+	checkoutSymlink(t, dir, path, target)
+	runTestGit(t, dir, "reset", "--mixed", "HEAD")
+}
+
 // initTestRepo creates a temporary git repository with an initial commit.
 // Returns the path to the repository.
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	cmds := [][]string{
-		{"git", "init"},
-		{"git", "config", "user.email", "test@example.com"},
-		{"git", "config", "user.name", "Test User"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("failed to run %v: %s: %v", args, string(out), err)
-		}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test User"},
+	} {
+		runTestGit(t, dir, args...)
 	}
 
 	// Create a file and commit it so HEAD exists.
-	if err := os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Test\n"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "README.md"), "# Test\n")
 
-	cmds = [][]string{
-		{"git", "add", "README.md"},
-		{"git", "commit", "-m", "initial commit"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("failed to run %v: %s: %v", args, string(out), err)
-		}
+	for _, args := range [][]string{
+		{"add", "README.md"},
+		{"commit", "-m", "initial commit"},
+	} {
+		runTestGit(t, dir, args...)
 	}
 
 	return dir
@@ -182,12 +228,12 @@ func TestGitError_Error(t *testing.T) {
 	}{
 		{
 			name:     "stderr takes precedence",
-			err:      &GitError{Args: []string{"status"}, Err: errors.New("exit 1"), Stderr: "fatal: not a git repository"},
+			err:      &GitError{Args: []string{"status"}, Err: core.NewError("exit 1"), Stderr: "fatal: not a git repository"},
 			expected: "git command \"git status\" failed: fatal: not a git repository",
 		},
 		{
 			name:     "falls back to underlying error",
-			err:      &GitError{Args: []string{"status"}, Err: errors.New("exit status 128"), Stderr: ""},
+			err:      &GitError{Args: []string{"status"}, Err: core.NewError("exit status 128"), Stderr: ""},
 			expected: "git command \"git status\" failed: exit status 128",
 		},
 	}
@@ -202,7 +248,7 @@ func TestGitError_Error(t *testing.T) {
 }
 
 func TestGitError_Unwrap(t *testing.T) {
-	inner := errors.New("underlying error")
+	inner := core.NewError("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
 	if got := gitErr.Unwrap(); inner != got {
 		t.Fatalf("want %v, got %v", inner, got)
@@ -227,22 +273,22 @@ func TestIsNonFastForward(t *testing.T) {
 		},
 		{
 			name:     "non-fast-forward message",
-			err:      errors.New("! [rejected] main -> main (non-fast-forward)"),
+			err:      core.NewError("! [rejected] main -> main (non-fast-forward)"),
 			expected: true,
 		},
 		{
 			name:     "fetch first message",
-			err:      errors.New("Updates were rejected because the remote contains work that you do not have locally. fetch first"),
+			err:      core.NewError("Updates were rejected because the remote contains work that you do not have locally. fetch first"),
 			expected: true,
 		},
 		{
 			name:     "tip behind message",
-			err:      errors.New("Updates were rejected because the tip of your current branch is behind"),
+			err:      core.NewError("Updates were rejected because the tip of your current branch is behind"),
 			expected: true,
 		},
 		{
 			name:     "unrelated error",
-			err:      errors.New("connection refused"),
+			err:      core.NewError("connection refused"),
 			expected: false,
 		},
 	}
@@ -259,7 +305,7 @@ func TestIsNonFastForward(t *testing.T) {
 // --- gitCommand tests with real git repos ---
 
 func TestGitCommand_Good(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	out, err := gitCommand(context.Background(), dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -280,7 +326,7 @@ func TestGitCommand_Bad_InvalidDir(t *testing.T) {
 }
 
 func TestGitCommand_Bad_NotARepo(t *testing.T) {
-	dir, _ := filepath.Abs(t.TempDir())
+	dir := t.TempDir()
 	_, err := gitCommand(context.Background(), dir, "status")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -322,7 +368,7 @@ func TestPull_Bad_RelativePath(t *testing.T) {
 // --- getStatus integration tests ---
 
 func TestGetStatus_Good_CleanRepo(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	status := getStatus(context.Background(), dir, "test-repo")
 	if status.Error != nil {
@@ -343,12 +389,10 @@ func TestGetStatus_Good_CleanRepo(t *testing.T) {
 }
 
 func TestGetStatus_Good_ModifiedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Modify the existing tracked file.
-	if err := os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Modified\n"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "README.md"), "# Modified\n")
 
 	status := getStatus(context.Background(), dir, "modified-repo")
 	if status.Error != nil {
@@ -363,12 +407,10 @@ func TestGetStatus_Good_ModifiedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_UntrackedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Create a new untracked file.
-	if err := os.WriteFile(core.JoinPath(dir, "newfile.txt"), []byte("hello"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "newfile.txt"), "hello")
 
 	status := getStatus(context.Background(), dir, "untracked-repo")
 	if status.Error != nil {
@@ -383,17 +425,11 @@ func TestGetStatus_Good_UntrackedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_StagedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Create and stage a new file.
-	if err := os.WriteFile(core.JoinPath(dir, "staged.txt"), []byte("staged"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	cmd := exec.Command("git", "add", "staged.txt")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "staged.txt"), "staged")
+	runTestGit(t, dir, "add", "staged.txt")
 
 	status := getStatus(context.Background(), dir, "staged-repo")
 	if status.Error != nil {
@@ -408,27 +444,17 @@ func TestGetStatus_Good_StagedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_MixedChanges(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Create untracked file.
-	if err := os.WriteFile(core.JoinPath(dir, "untracked.txt"), []byte("new"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "untracked.txt"), "new")
 
 	// Modify tracked file.
-	if err := os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Changed\n"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "README.md"), "# Changed\n")
 
 	// Create and stage another file.
-	if err := os.WriteFile(core.JoinPath(dir, "staged.txt"), []byte("staged"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	cmd := exec.Command("git", "add", "staged.txt")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "staged.txt"), "staged")
+	runTestGit(t, dir, "add", "staged.txt")
 
 	status := getStatus(context.Background(), dir, "mixed-repo")
 	if status.Error != nil {
@@ -449,12 +475,10 @@ func TestGetStatus_Good_MixedChanges(t *testing.T) {
 }
 
 func TestGetStatus_Good_DeletedTrackedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Delete the tracked file (unstaged deletion).
-	if err := os.Remove(core.JoinPath(dir, "README.md")); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	deleteTestPath(t, core.JoinPath(dir, "README.md"))
 
 	status := getStatus(context.Background(), dir, "deleted-repo")
 	if status.Error != nil {
@@ -469,14 +493,10 @@ func TestGetStatus_Good_DeletedTrackedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_StagedDeletion(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Stage a deletion.
-	cmd := exec.Command("git", "rm", "README.md")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	runTestGit(t, dir, "rm", "README.md")
 
 	status := getStatus(context.Background(), dir, "staged-delete-repo")
 	if status.Error != nil {
@@ -491,55 +511,31 @@ func TestGetStatus_Good_StagedDeletion(t *testing.T) {
 }
 
 func TestGetStatus_Good_MergeConflict(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Create a conflicting change on a feature branch.
-	cmd := exec.Command("git", "checkout", "-b", "feature")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	runTestGit(t, dir, "checkout", "-b", "feature")
 
-	if err := os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Feature\n"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "README.md"), "# Feature\n")
 	for _, args := range [][]string{
-		{"git", "add", "README.md"},
-		{"git", "commit", "-m", "feature change"},
+		{"add", "README.md"},
+		{"commit", "-m", "feature change"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("failed to run %v: %s: %v", args, string(out), err)
-		}
+		runTestGit(t, dir, args...)
 	}
 
 	// Return to the original branch and create a divergent change.
-	cmd = exec.Command("git", "checkout", "-")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	runTestGit(t, dir, "checkout", "-")
 
-	if err := os.WriteFile(core.JoinPath(dir, "README.md"), []byte("# Main\n"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir, "README.md"), "# Main\n")
 	for _, args := range [][]string{
-		{"git", "add", "README.md"},
-		{"git", "commit", "-m", "main change"},
+		{"add", "README.md"},
+		{"commit", "-m", "main change"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("failed to run %v: %s: %v", args, string(out), err)
-		}
+		runTestGit(t, dir, args...)
 	}
 
-	cmd = exec.Command("git", "merge", "feature")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	out, err := gitTestOutput(dir, "merge", "feature")
 	if err == nil {
 		t.Fatal("expected the merge to conflict: expected error, got nil")
 	}
@@ -588,13 +584,11 @@ func TestGetStatus_Bad_RelativePath(t *testing.T) {
 // --- Status (parallel multi-repo) tests ---
 
 func TestStatus_Good_MultipleRepos(t *testing.T) {
-	dir1, _ := filepath.Abs(initTestRepo(t))
-	dir2, _ := filepath.Abs(initTestRepo(t))
+	dir1 := initTestRepo(t)
+	dir2 := initTestRepo(t)
 
 	// Make dir2 dirty.
-	if err := os.WriteFile(core.JoinPath(dir2, "extra.txt"), []byte("extra"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir2, "extra.txt"), "extra")
 
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{dir1, dir2},
@@ -630,12 +624,10 @@ func TestStatus_Good_MultipleRepos(t *testing.T) {
 }
 
 func TestStatusIter_Good_MultipleRepos(t *testing.T) {
-	dir1, _ := filepath.Abs(initTestRepo(t))
-	dir2, _ := filepath.Abs(initTestRepo(t))
+	dir1 := initTestRepo(t)
+	dir2 := initTestRepo(t)
 
-	if err := os.WriteFile(core.JoinPath(dir2, "extra.txt"), []byte("extra"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(dir2, "extra.txt"), "extra")
 
 	statuses := slices.Collect(StatusIter(context.Background(), StatusOptions{
 		Paths: []string{dir1, dir2},
@@ -672,7 +664,7 @@ func TestStatus_Good_EmptyPaths(t *testing.T) {
 }
 
 func TestStatus_Good_NameFallback(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// No name mapping — path should be used as name.
 	results := Status(context.Background(), StatusOptions{
@@ -689,8 +681,8 @@ func TestStatus_Good_NameFallback(t *testing.T) {
 }
 
 func TestStatus_Good_WithErrors(t *testing.T) {
-	validDir, _ := filepath.Abs(initTestRepo(t))
-	invalidDir, _ := filepath.Abs("/nonexistent/path")
+	validDir := initTestRepo(t)
+	invalidDir := "/nonexistent/path"
 
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{validDir, invalidDir},
@@ -715,7 +707,7 @@ func TestStatus_Good_WithErrors(t *testing.T) {
 
 func TestPushMultiple_Good_NoRemote(t *testing.T) {
 	// Push without a remote will fail but we can test the result structure.
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{
 		dir: "test-repo",
@@ -743,7 +735,7 @@ func TestPushMultiple_Good_NoRemote(t *testing.T) {
 }
 
 func TestPullMultiple_Good_NoRemote(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	results, err := PullMultiple(context.Background(), []string{dir}, map[string]string{
 		dir: "test-repo",
@@ -770,7 +762,7 @@ func TestPullMultiple_Good_NoRemote(t *testing.T) {
 }
 
 func TestPushMultiple_Good_NameFallback(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{})
 	if err == nil {
@@ -786,7 +778,7 @@ func TestPushMultiple_Good_NameFallback(t *testing.T) {
 }
 
 func TestPullMultiple_Good_NameFallback(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	results, err := PullMultiple(context.Background(), []string{dir}, map[string]string{})
 	if err == nil {
@@ -802,7 +794,7 @@ func TestPullMultiple_Good_NameFallback(t *testing.T) {
 }
 
 func TestPushMultipleIter_Good_NameFallback(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	results := slices.Collect(PushMultipleIter(context.Background(), []string{dir}, map[string]string{}))
 
@@ -821,7 +813,7 @@ func TestPushMultipleIter_Good_NameFallback(t *testing.T) {
 }
 
 func TestPullMultipleIter_Good_NameFallback(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	results := slices.Collect(PullMultipleIter(context.Background(), []string{dir}, map[string]string{}))
 
@@ -840,7 +832,7 @@ func TestPullMultipleIter_Good_NameFallback(t *testing.T) {
 }
 
 func TestPushMultiple_Bad_RelativePath(t *testing.T) {
-	validDir, _ := filepath.Abs(initTestRepo(t))
+	validDir := initTestRepo(t)
 	relativePath := "relative/repo"
 
 	results, err := PushMultiple(context.Background(), []string{relativePath, validDir}, map[string]string{
@@ -868,7 +860,7 @@ func TestPushMultiple_Bad_RelativePath(t *testing.T) {
 }
 
 func TestPullMultiple_Bad_RelativePath(t *testing.T) {
-	validDir, _ := filepath.Abs(initTestRepo(t))
+	validDir := initTestRepo(t)
 	relativePath := "relative/repo"
 
 	results, err := PullMultiple(context.Background(), []string{relativePath, validDir}, map[string]string{
@@ -898,7 +890,7 @@ func TestPullMultiple_Bad_RelativePath(t *testing.T) {
 // --- Pull tests ---
 
 func TestPull_Bad_NoRemote(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 	err := Pull(context.Background(), dir)
 	if err == nil {
 		t.Fatal("pull without remote should fail: expected error, got nil")
@@ -908,7 +900,7 @@ func TestPull_Bad_NoRemote(t *testing.T) {
 // --- Push tests ---
 
 func TestPush_Bad_NoRemote(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 	err := Push(context.Background(), dir)
 	if err == nil {
 		t.Fatal("push without remote should fail: expected error, got nil")
@@ -918,7 +910,7 @@ func TestPush_Bad_NoRemote(t *testing.T) {
 // --- Context cancellation test ---
 
 func TestGetStatus_Good_ContextCancellation(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
@@ -934,64 +926,40 @@ func TestGetStatus_Good_ContextCancellation(t *testing.T) {
 
 func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
 	// Create a bare remote and a clone to test ahead/behind counts.
-	bareDir, _ := filepath.Abs(t.TempDir())
-	cloneDir, _ := filepath.Abs(t.TempDir())
+	bareDir := t.TempDir()
+	cloneDir := t.TempDir()
 
 	// Initialise the bare repo.
-	cmd := exec.Command("git", "init", "--bare")
-	cmd.Dir = bareDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	runTestGit(t, bareDir, "init", "--bare")
 
 	// Clone it.
-	cmd = exec.Command("git", "clone", bareDir, cloneDir)
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	runTestGit(t, "", "clone", bareDir, cloneDir)
 
 	// Configure user in clone.
 	for _, args := range [][]string{
-		{"git", "config", "user.email", "test@example.com"},
-		{"git", "config", "user.name", "Test User"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test User"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		if err := cmd.Run(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		runTestGit(t, cloneDir, args...)
 	}
 
 	// Create initial commit and push.
-	if err := os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v1"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(cloneDir, "file.txt"), "v1")
 	for _, args := range [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", "initial"},
-		{"git", "push", "origin", "HEAD"},
+		{"add", "."},
+		{"commit", "-m", "initial"},
+		{"push", "origin", "HEAD"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("command %v failed: %s: %v", args, string(out), err)
-		}
+		runTestGit(t, cloneDir, args...)
 	}
 
 	// Make a local commit without pushing (ahead by 1).
-	if err := os.WriteFile(core.JoinPath(cloneDir, "file.txt"), []byte("v2"), 0644); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	writeTestFile(t, core.JoinPath(cloneDir, "file.txt"), "v2")
 	for _, args := range [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", "local commit"},
+		{"add", "."},
+		{"commit", "-m", "local commit"},
 	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		if err := cmd.Run(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		runTestGit(t, cloneDir, args...)
 	}
 
 	ahead, behind, err := getAheadBehind(context.Background(), cloneDir)
@@ -1009,14 +977,10 @@ func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
 // --- Renamed file detection ---
 
 func TestGetStatus_Good_RenamedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Rename via git mv (stages the rename).
-	cmd := exec.Command("git", "mv", "README.md", "GUIDE.md")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	runTestGit(t, dir, "mv", "README.md", "GUIDE.md")
 
 	status := getStatus(context.Background(), dir, "renamed-repo")
 	if status.Error != nil {
@@ -1031,15 +995,10 @@ func TestGetStatus_Good_RenamedFile(t *testing.T) {
 }
 
 func TestGetStatus_Good_TypeChangedFile_WorkingTree(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
 	// Replace the tracked file with a symlink to trigger a working-tree type change.
-	if err := os.Remove(core.JoinPath(dir, "README.md")); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := os.Symlink("/etc/hosts", core.JoinPath(dir, "README.md")); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	replaceWorkingTreeWithSymlink(t, dir, "README.md", "/etc/hosts")
 
 	status := getStatus(context.Background(), dir, "typechanged-working-tree")
 	if status.Error != nil {
@@ -1054,21 +1013,10 @@ func TestGetStatus_Good_TypeChangedFile_WorkingTree(t *testing.T) {
 }
 
 func TestGetStatus_Good_TypeChangedFile_Staged(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	dir := initTestRepo(t)
 
-	// Stage a type change by replacing the tracked file with a symlink and adding it.
-	if err := os.Remove(core.JoinPath(dir, "README.md")); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := os.Symlink("/etc/hosts", core.JoinPath(dir, "README.md")); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	cmd := exec.Command("git", "add", "README.md")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	// Stage a type change by replacing the tracked file with a git symlink entry.
+	checkoutSymlink(t, dir, "README.md", "/etc/hosts")
 
 	status := getStatus(context.Background(), dir, "typechanged-staged")
 	if status.Error != nil {
