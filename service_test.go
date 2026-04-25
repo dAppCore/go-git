@@ -264,9 +264,10 @@ func TestTaskPullMultiple_TypeExists(t *testing.T) {
 }
 
 func TestServiceOptions_WorkDir(t *testing.T) {
-	opts := ServiceOptions{WorkDir: "/home/claude/repos"}
-	if "/home/claude/repos" != opts.WorkDir {
-		t.Fatalf("want %v, got %v", "/home/claude/repos", opts.WorkDir)
+	workDir := "/tmp/test-repos"
+	opts := ServiceOptions{WorkDir: workDir}
+	if workDir != opts.WorkDir {
+		t.Fatalf("want %v, got %v", workDir, opts.WorkDir)
 	}
 }
 
