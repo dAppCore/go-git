@@ -2,17 +2,16 @@
 package git
 
 import (
-	"bytes"         // Note: intrinsic — command output buffering for git stdout/stderr; no core equivalent
-	"context"       // Note: intrinsic — cancellation propagation for git subprocesses and iterators; no core equivalent
-	"fmt"           // Note: intrinsic — error and GitError message formatting; no core equivalent
-	goio "io"       // Note: intrinsic — stderr teeing while preserving captured output; no core equivalent
-	"iter"          // Note: intrinsic — public lazy sequence API for repository operations; no core equivalent
-	"os"            // Note: intrinsic — interactive git subprocess standard streams; no core equivalent
-	"os/exec"       // Note: intrinsic — executing the git CLI for repository operations; no core equivalent
-	"path/filepath" // Note: intrinsic — absolute path validation for local repositories; no core equivalent
-	"slices"        // Note: intrinsic — collecting and cloning iterator-backed result slices; no core equivalent
-	"strconv"       // Note: intrinsic — parsing ahead/behind counts from git output; no core equivalent
-	"strings"       // Note: intrinsic — parsing and normalizing git command output; no core equivalent
+	"bytes"   // Note: intrinsic — command output buffering for git stdout/stderr; no core equivalent
+	"context" // Note: intrinsic — cancellation propagation for git subprocesses and iterators; no core equivalent
+	goio "io" // Note: intrinsic — stderr teeing while preserving captured output; no core equivalent
+	"iter"    // Note: intrinsic — public lazy sequence API for repository operations; no core equivalent
+	"os"      // Note: intrinsic — interactive git subprocess standard streams; no core equivalent
+	"os/exec" // Note: intrinsic — executing the git CLI for repository operations; no core equivalent
+	"slices"  // Note: intrinsic — collecting and cloning iterator-backed result slices; no core equivalent
+	"strconv" // Note: intrinsic — parsing ahead/behind counts from git output; no core equivalent
+
+	core "dappco.re/go/core"
 )
 
 func withBackground(ctx context.Context) context.Context {
@@ -152,7 +151,7 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	}
 
 	// Parse status output
-	for _, line := range strings.Split(porcelain, "\n") {
+	for _, line := range core.Split(porcelain, "\n") {
 		if len(line) < 2 {
 			continue
 		}
@@ -211,17 +210,17 @@ func isNoUpstreamError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(trim(err.Error()))
-	return strings.Contains(msg, "no upstream")
+	msg := core.Lower(trim(err.Error()))
+	return core.Contains(msg, "no upstream")
 }
 
 func requireAbsolutePath(op string, path string) error {
-	if filepath.IsAbs(path) {
+	if core.PathIsAbs(path) {
 		return nil
 	}
 	return &GitError{
 		Args:   []string{op},
-		Err:    fmt.Errorf("path must be absolute: %s", path),
+		Err:    core.E(op, core.Sprintf("path must be absolute: %s", path), nil),
 		Stderr: "",
 	}
 }
@@ -237,7 +236,7 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 	if err == nil {
 		ahead, err = strconv.Atoi(trim(aheadStr))
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed to parse ahead count: %w", err)
+			return 0, 0, core.E("git.getAheadBehind", "failed to parse ahead count", err)
 		}
 	} else if isNoUpstreamError(err) {
 		err = nil
@@ -251,7 +250,7 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 	if err == nil {
 		behind, err = strconv.Atoi(trim(behindStr))
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed to parse behind count: %w", err)
+			return 0, 0, core.E("git.getAheadBehind", "failed to parse behind count", err)
 		}
 	} else if isNoUpstreamError(err) {
 		err = nil
@@ -295,10 +294,10 @@ func IsNonFastForward(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "non-fast-forward") ||
-		strings.Contains(msg, "fetch first") ||
-		strings.Contains(msg, "tip of your current branch is behind")
+	msg := core.Lower(err.Error())
+	return core.Contains(msg, "non-fast-forward") ||
+		core.Contains(msg, "fetch first") ||
+		core.Contains(msg, "tip of your current branch is behind")
 }
 
 // gitInteractive runs a git command with terminal attached for user interaction.
@@ -469,16 +468,16 @@ type GitError struct {
 
 // Error returns a descriptive error message.
 func (e *GitError) Error() string {
-	cmd := "git " + strings.Join(e.Args, " ")
+	cmd := "git " + core.Join(" ", e.Args...)
 	stderr := trim(e.Stderr)
 
 	if stderr != "" {
-		return fmt.Sprintf("git command %q failed: %s", cmd, stderr)
+		return core.Sprintf("git command %q failed: %s", cmd, stderr)
 	}
 	if e.Err != nil {
-		return fmt.Sprintf("git command %q failed: %v", cmd, e.Err)
+		return core.Sprintf("git command %q failed: %v", cmd, e.Err)
 	}
-	return fmt.Sprintf("git command %q failed", cmd)
+	return core.Sprintf("git command %q failed", cmd)
 }
 
 // Unwrap returns the underlying error for error chain inspection.
@@ -487,5 +486,5 @@ func (e *GitError) Unwrap() error {
 }
 
 func trim(s string) string {
-	return strings.TrimSpace(s)
+	return core.Trim(s)
 }
