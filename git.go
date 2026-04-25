@@ -2,14 +2,11 @@
 package git
 
 import (
-	"bytes"   // Note: intrinsic — command output buffering for git stdout/stderr; no core equivalent
 	"context" // Note: intrinsic — cancellation propagation for git subprocesses and iterators; no core equivalent
-	goio "io" // Note: intrinsic — stderr teeing while preserving captured output; no core equivalent
 	"iter"    // Note: intrinsic — public lazy sequence API for repository operations; no core equivalent
 	"os"      // Note: intrinsic — interactive git subprocess standard streams; no core equivalent
 	"os/exec" // Note: intrinsic — executing the git CLI for repository operations; no core equivalent
 	"slices"  // Note: intrinsic — collecting and cloning iterator-backed result slices; no core equivalent
-	"strconv" // Note: intrinsic — parsing ahead/behind counts from git output; no core equivalent
 
 	core "dappco.re/go/core"
 )
@@ -234,9 +231,9 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 
 	aheadStr, err := gitCommand(ctx, path, "rev-list", "--count", "@{u}..HEAD")
 	if err == nil {
-		ahead, err = strconv.Atoi(trim(aheadStr))
+		ahead, err = parseGitCount("git.getAheadBehind", "ahead", aheadStr)
 		if err != nil {
-			return 0, 0, core.E("git.getAheadBehind", "failed to parse ahead count", err)
+			return 0, 0, err
 		}
 	} else if isNoUpstreamError(err) {
 		err = nil
@@ -248,15 +245,24 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 
 	behindStr, err := gitCommand(ctx, path, "rev-list", "--count", "HEAD..@{u}")
 	if err == nil {
-		behind, err = strconv.Atoi(trim(behindStr))
+		behind, err = parseGitCount("git.getAheadBehind", "behind", behindStr)
 		if err != nil {
-			return 0, 0, core.E("git.getAheadBehind", "failed to parse behind count", err)
+			return 0, 0, err
 		}
 	} else if isNoUpstreamError(err) {
 		err = nil
 	}
 
 	return ahead, behind, err
+}
+
+func parseGitCount(scope, label, value string) (int, error) {
+	r := core.ParseInt(trim(value), 10, 0)
+	if !r.OK {
+		err, _ := r.Value.(error)
+		return 0, core.E(scope, core.Sprintf("failed to parse %s count", label), err)
+	}
+	return int(r.Value.(int64)), nil
 }
 
 // Push pushes commits for a single repository.
@@ -315,8 +321,8 @@ func gitInteractive(ctx context.Context, dir string, args ...string) error {
 	cmd.Stdout = os.Stdout
 
 	// Capture stderr for error reporting while also showing it
-	var stderr bytes.Buffer
-	cmd.Stderr = goio.MultiWriter(os.Stderr, &stderr)
+	stderr := core.NewBuffer()
+	cmd.Stderr = stderrTee{capture: stderr}
 
 	if err := cmd.Run(); err != nil {
 		return &GitError{
@@ -327,6 +333,19 @@ func gitInteractive(ctx context.Context, dir string, args ...string) error {
 	}
 
 	return nil
+}
+
+type stderrTee struct {
+	capture interface {
+		Write([]byte) (int, error)
+	}
+}
+
+func (w stderrTee) Write(p []byte) (int, error) {
+	if _, err := os.Stderr.Write(p); err != nil {
+		return 0, err
+	}
+	return w.capture.Write(p)
 }
 
 // PushResult represents the result of a push operation.
@@ -441,9 +460,10 @@ func gitCommand(ctx context.Context, dir string, args ...string) (string, error)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := core.NewBuffer()
+	stderr := core.NewBuffer()
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	if err := cmd.Run(); err != nil {
 		return "", &GitError{

@@ -3,9 +3,7 @@ package git
 import (
 	"context"
 	"iter"
-	"path/filepath"
 	"slices"
-	"sync"
 
 	"dappco.re/go/core"
 	coreerr "dappco.re/go/log"
@@ -66,7 +64,6 @@ var _ core.Startable = (*Service)(nil)
 type Service struct {
 	*core.ServiceRuntime[ServiceOptions]
 	opts       ServiceOptions
-	mu         sync.RWMutex
 	lastStatus []RepoStatus
 }
 
@@ -75,6 +72,7 @@ const (
 	actionGitPull         = "git.pull"
 	actionGitPushMultiple = "git.push-multiple"
 	actionGitPullMultiple = "git.pull-multiple"
+	statusLockName        = "git.status"
 )
 
 // NewService creates a git service factory.
@@ -148,9 +146,10 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 
 		statuses := Status(ctx, StatusOptions(m))
 
-		s.mu.Lock()
+		statusLock := c.Lock(statusLockName)
+		statusLock.Lock()
 		s.lastStatus = statuses
-		s.mu.Unlock()
+		statusLock.Unlock()
 
 		return core.Result{Value: statuses, OK: true}
 
@@ -228,7 +227,7 @@ func (s *Service) runPullMultiple(ctx context.Context, paths []string, names map
 }
 
 func (s *Service) validatePath(path string) error {
-	if !filepath.IsAbs(path) {
+	if !core.PathIsAbs(path) {
 		return coreerr.E("git.validatePath", "path must be absolute: "+path, nil)
 	}
 
@@ -237,15 +236,25 @@ func (s *Service) validatePath(path string) error {
 		return nil
 	}
 
-	workDir = filepath.Clean(workDir)
-	if !filepath.IsAbs(workDir) {
+	workDir = core.CleanPath(workDir, "/")
+	if !core.PathIsAbs(workDir) {
 		return coreerr.E("git.validatePath", "WorkDir must be absolute: "+s.opts.WorkDir, nil)
 	}
-	rel, err := filepath.Rel(workDir, filepath.Clean(path))
-	if err != nil || rel == ".." || core.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	path = core.CleanPath(path, "/")
+	if !pathWithinWorkDir(path, workDir) {
 		return coreerr.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
 	}
 	return nil
+}
+
+func pathWithinWorkDir(path, workDir string) bool {
+	if path == workDir {
+		return true
+	}
+	if workDir == "/" {
+		return core.HasPrefix(path, "/")
+	}
+	return core.HasPrefix(path, core.JoinPath(workDir, ""))
 }
 
 func (s *Service) validatePaths(paths []string) error {
@@ -259,22 +268,31 @@ func (s *Service) validatePaths(paths []string) error {
 
 // Status returns last status result.
 func (s *Service) Status() []RepoStatus {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	statusLock := s.statusLock(nil)
+	if statusLock != nil {
+		statusLock.RLock()
+		defer statusLock.RUnlock()
+	}
 	return slices.Clone(s.lastStatus)
 }
 
 // All returns an iterator over all last known statuses.
 func (s *Service) All() iter.Seq[RepoStatus] {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	statusLock := s.statusLock(nil)
+	if statusLock != nil {
+		statusLock.RLock()
+		defer statusLock.RUnlock()
+	}
 	return slices.Values(slices.Clone(s.lastStatus))
 }
 
 // filteredIter returns an iterator over status entries that satisfy pred.
 func (s *Service) filteredIter(pred func(RepoStatus) bool) iter.Seq[RepoStatus] {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	statusLock := s.statusLock(nil)
+	if statusLock != nil {
+		statusLock.RLock()
+		defer statusLock.RUnlock()
+	}
 	snapshot := slices.Clone(s.lastStatus)
 
 	return func(yield func(RepoStatus) bool) {
@@ -286,6 +304,16 @@ func (s *Service) filteredIter(pred func(RepoStatus) bool) iter.Seq[RepoStatus] 
 			}
 		}
 	}
+}
+
+func (s *Service) statusLock(c *core.Core) *core.Lock {
+	if c != nil {
+		return c.Lock(statusLockName)
+	}
+	if s.ServiceRuntime == nil || s.Core() == nil {
+		return nil
+	}
+	return s.Core().Lock(statusLockName)
 }
 
 // Dirty returns an iterator over repos with uncommitted changes.
