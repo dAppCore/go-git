@@ -18,7 +18,7 @@ go-git is a Go library for orchestrating Git operations across multiple reposito
 The library provides two layers:
 
 1. **Standalone functions** -- pure Git operations that depend only on the standard library.
-2. **Core service integration** -- a `Service` type that plugs into the Core DI framework, exposing Git operations via the query/task message bus.
+2. **Core service integration** -- a `Service` type that plugs into the Core DI framework, exposing Git operations via the query/action message bus.
 
 Typical use cases include multi-repo status dashboards, batch push/pull workflows, and CI tooling that needs to inspect many repositories at once.
 
@@ -108,8 +108,7 @@ func main() {
 
 | Dependency | Purpose |
 |------------|---------|
-| `forge.lthn.ai/core/go/pkg/core` | DI container, `ServiceRuntime`, query/task bus (used only by `service.go`). |
-| `github.com/stretchr/testify` | Assertions in tests (test-only). |
+| `dappco.re/go/core` | DI container, `ServiceRuntime`, query/action bus (used only by `service.go`). |
 
 The standalone layer (`git.go`) uses only the Go standard library. It shells out to the system `git` binary -- there is no embedded Git implementation.
 

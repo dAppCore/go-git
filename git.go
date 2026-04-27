@@ -2,13 +2,16 @@
 package git
 
 import (
+	"bytes"
 	"context" // Note: intrinsic — cancellation propagation for git subprocesses and iterators; no core equivalent
+	"fmt"
 	"iter"    // Note: intrinsic — public lazy sequence API for repository operations; no core equivalent
 	"os"      // Note: intrinsic — interactive git subprocess standard streams; no core equivalent
 	"os/exec" // Note: intrinsic — executing the git CLI for repository operations; no core equivalent
-	"slices"  // Note: intrinsic — collecting and cloning iterator-backed result slices; no core equivalent
-
-	core "dappco.re/go/core"
+	"path/filepath"
+	"slices" // Note: intrinsic — collecting and cloning iterator-backed result slices; no core equivalent
+	"strconv"
+	"strings"
 )
 
 func withBackground(ctx context.Context) context.Context {
@@ -148,7 +151,7 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	}
 
 	// Parse status output
-	for _, line := range core.Split(porcelain, "\n") {
+	for _, line := range strings.Split(porcelain, "\n") {
 		if len(line) < 2 {
 			continue
 		}
@@ -207,18 +210,19 @@ func isNoUpstreamError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := core.Lower(trim(err.Error()))
-	return core.Contains(msg, "no upstream")
+	msg := strings.ToLower(trim(err.Error()))
+	return strings.Contains(msg, "no upstream")
 }
 
 func requireAbsolutePath(op string, path string) error {
-	if core.PathIsAbs(path) {
+	if filepath.IsAbs(path) {
 		return nil
 	}
+	msg := fmt.Sprintf("path must be absolute: %s", path)
 	return &GitError{
-		Args:   []string{op},
-		Err:    core.E(op, core.Sprintf("path must be absolute: %s", path), nil),
-		Stderr: "",
+		Args:   []string{op, path},
+		Err:    fmt.Errorf("%s: %s", op, msg),
+		Stderr: msg,
 	}
 }
 
@@ -229,11 +233,12 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 		return 0, 0, err
 	}
 
-	aheadStr, err := gitCommand(ctx, path, "rev-list", "--count", "@{u}..HEAD")
+	aheadArgs := []string{"rev-list", "--count", "@{u}..HEAD"}
+	aheadStr, err := gitCommand(ctx, path, aheadArgs...)
 	if err == nil {
-		ahead, err = parseGitCount("git.getAheadBehind", "ahead", aheadStr)
+		ahead, err = parseGitCount("ahead", aheadStr)
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, gitParseError(aheadArgs, aheadStr, err)
 		}
 	} else if isNoUpstreamError(err) {
 		err = nil
@@ -243,11 +248,12 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 		return 0, 0, err
 	}
 
-	behindStr, err := gitCommand(ctx, path, "rev-list", "--count", "HEAD..@{u}")
+	behindArgs := []string{"rev-list", "--count", "HEAD..@{u}"}
+	behindStr, err := gitCommand(ctx, path, behindArgs...)
 	if err == nil {
-		behind, err = parseGitCount("git.getAheadBehind", "behind", behindStr)
+		behind, err = parseGitCount("behind", behindStr)
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, gitParseError(behindArgs, behindStr, err)
 		}
 	} else if isNoUpstreamError(err) {
 		err = nil
@@ -256,13 +262,20 @@ func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err er
 	return ahead, behind, err
 }
 
-func parseGitCount(scope, label, value string) (int, error) {
-	r := core.ParseInt(trim(value), 10, 0)
-	if !r.OK {
-		err, _ := r.Value.(error)
-		return 0, core.E(scope, core.Sprintf("failed to parse %s count", label), err)
+func parseGitCount(label, value string) (int, error) {
+	n, err := strconv.ParseInt(trim(value), 10, 0)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse %s count: %w", label, err)
 	}
-	return int(r.Value.(int64)), nil
+	return int(n), nil
+}
+
+func gitParseError(args []string, output string, err error) *GitError {
+	return &GitError{
+		Args:   slices.Clone(args),
+		Err:    err,
+		Stderr: fmt.Sprintf("invalid git count output %q: %v", trim(output), err),
+	}
 }
 
 // Push pushes commits for a single repository.
@@ -300,10 +313,10 @@ func IsNonFastForward(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := core.Lower(err.Error())
-	return core.Contains(msg, "non-fast-forward") ||
-		core.Contains(msg, "fetch first") ||
-		core.Contains(msg, "tip of your current branch is behind")
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "non-fast-forward") ||
+		strings.Contains(msg, "fetch first") ||
+		strings.Contains(msg, "tip of your current branch is behind")
 }
 
 // gitInteractive runs a git command with terminal attached for user interaction.
@@ -321,7 +334,7 @@ func gitInteractive(ctx context.Context, dir string, args ...string) error {
 	cmd.Stdout = os.Stdout
 
 	// Capture stderr for error reporting while also showing it
-	stderr := core.NewBuffer()
+	stderr := &bytes.Buffer{}
 	cmd.Stderr = stderrTee{capture: stderr}
 
 	if err := cmd.Run(); err != nil {
@@ -460,8 +473,8 @@ func gitCommand(ctx context.Context, dir string, args ...string) (string, error)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
-	stdout := core.NewBuffer()
-	stderr := core.NewBuffer()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
@@ -488,16 +501,16 @@ type GitError struct {
 
 // Error returns a descriptive error message.
 func (e *GitError) Error() string {
-	cmd := "git " + core.Join(" ", e.Args...)
+	cmd := "git " + strings.Join(e.Args, " ")
 	stderr := trim(e.Stderr)
 
 	if stderr != "" {
-		return core.Sprintf("git command %q failed: %s", cmd, stderr)
+		return fmt.Sprintf("git command %q failed: %s", cmd, stderr)
 	}
 	if e.Err != nil {
-		return core.Sprintf("git command %q failed: %v", cmd, e.Err)
+		return fmt.Sprintf("git command %q failed: %v", cmd, e.Err)
 	}
-	return core.Sprintf("git command %q failed", cmd)
+	return fmt.Sprintf("git command %q failed", cmd)
 }
 
 // Unwrap returns the underlying error for error chain inspection.
@@ -506,5 +519,5 @@ func (e *GitError) Unwrap() error {
 }
 
 func trim(s string) string {
-	return core.Trim(s)
+	return strings.TrimSpace(s)
 }

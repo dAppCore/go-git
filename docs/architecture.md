@@ -142,12 +142,34 @@ The factory constructs a `Service` embedding `core.ServiceRuntime[ServiceOptions
 
 ### Lifecycle
 
-`Service` implements the `Startable` interface. On startup, it registers a query handler and a broadcast action handler with the Core message bus:
+`Service` implements the `Startable` interface. On startup, it registers the query/task bridge handlers and named Core actions for direct action-bus callers:
 
 ```go
 func (s *Service) OnStartup(ctx context.Context) core.Result {
     s.Core().RegisterQuery(s.handleQuery)
     s.Core().RegisterAction(s.handleTaskMessage)
+
+    s.Core().Action("git.push", func(ctx context.Context, opts core.Options) core.Result {
+        return s.runPush(ctx, opts.String("path"))
+    })
+    s.Core().Action("git.pull", func(ctx context.Context, opts core.Options) core.Result {
+        return s.runPull(ctx, opts.String("path"))
+    })
+    s.Core().Action("git.push-multiple", func(ctx context.Context, opts core.Options) core.Result {
+        paths, names, err := multipleActionPayload(opts, "git.push-multiple")
+        if err != nil {
+            return s.logError(err, "git.push-multiple", "invalid action payload")
+        }
+        return s.runPushMultiple(ctx, paths, names)
+    })
+    s.Core().Action("git.pull-multiple", func(ctx context.Context, opts core.Options) core.Result {
+        paths, names, err := multipleActionPayload(opts, "git.pull-multiple")
+        if err != nil {
+            return s.logError(err, "git.pull-multiple", "invalid action payload")
+        }
+        return s.runPullMultiple(ctx, paths, names)
+    })
+
     return core.Result{OK: true}
 }
 ```
@@ -181,20 +203,29 @@ statuses := Status(ctx, StatusOptions(queryStatus))
 All query and task handlers validate paths before execution:
 
 1. Paths must be absolute (rejects relative paths).
-2. If `ServiceOptions.WorkDir` is set, all paths must be descendants of that directory. This prevents directory traversal.
+2. If `ServiceOptions.WorkDir` is set, both `WorkDir` and the target path are resolved through symlinks before the boundary check.
+3. Validation failures return `*GitError` with command context in `Args` and a diagnostic message in `Stderr`.
 
 ```go
-func (s *Service) validatePath(path string) error {
+func (s *Service) validatePath(path string) (string, error) {
     if !filepath.IsAbs(path) {
-        return fmt.Errorf("path must be absolute: %s", path)
+        return "", gitValidationError("path must be absolute: "+path, path, s.opts.WorkDir, nil)
     }
     if s.opts.WorkDir != "" {
-        rel, err := filepath.Rel(s.opts.WorkDir, path)
-        if err != nil || strings.HasPrefix(rel, "..") {
-            return fmt.Errorf("path %s is outside of allowed WorkDir %s", path, s.opts.WorkDir)
+        resolvedWorkDir, err := filepath.EvalSymlinks(s.opts.WorkDir)
+        if err != nil {
+            return "", gitValidationError("failed to resolve WorkDir: "+s.opts.WorkDir, path, s.opts.WorkDir, err)
         }
+        resolvedPath, err := filepath.EvalSymlinks(path)
+        if err != nil {
+            return "", gitValidationError("failed to resolve path: "+path, path, s.opts.WorkDir, err)
+        }
+        if !pathWithinWorkDir(resolvedPath, resolvedWorkDir) {
+            return "", gitValidationError("path is outside of allowed WorkDir", path, s.opts.WorkDir, nil)
+        }
+        return resolvedPath, nil
     }
-    return nil
+    return filepath.Clean(path), nil
 }
 ```
 

@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,61 +14,97 @@ import (
 
 // --- validatePath tests ---
 
-func TestService_ValidatePath_Bad_RelativePath(t *testing.T) {
-	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
-	err := svc.validatePath("relative/path")
+func assertServiceGitError(t *testing.T, err error, want string) *GitError {
+	t.Helper()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "path must be absolute") {
-		t.Fatalf("expected %v to contain %v", err.Error(), "path must be absolute")
+	var gitErr *GitError
+	if !errors.As(err, &gitErr) {
+		t.Fatalf("expected *GitError, got %T", err)
 	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected %v to contain %v", err.Error(), want)
+	}
+	if strings.TrimSpace(gitErr.Stderr) == "" {
+		t.Fatalf("expected non-empty stderr for %v", gitErr.Args)
+	}
+	return gitErr
+}
+
+func TestService_ValidatePath_Bad_RelativePath(t *testing.T) {
+	svc := &Service{opts: ServiceOptions{WorkDir: t.TempDir()}}
+	_, err := svc.validatePath("relative/path")
+	assertServiceGitError(t, err, "path must be absolute")
 }
 
 func TestService_ValidatePath_Bad_OutsideWorkDir(t *testing.T) {
-	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
-	err := svc.validatePath("/etc/passwd")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "outside of allowed WorkDir") {
-		t.Fatalf("expected %v to contain %v", err.Error(), "outside of allowed WorkDir")
-	}
+	workDir := t.TempDir()
+	outside := t.TempDir()
+	svc := &Service{opts: ServiceOptions{WorkDir: workDir}}
+	_, err := svc.validatePath(outside)
+	assertServiceGitError(t, err, "outside of allowed WorkDir")
 }
 
 func TestService_ValidatePath_Bad_OutsideWorkDirPrefix(t *testing.T) {
-	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
-	err := svc.validatePath("/home/repos2")
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	base := t.TempDir()
+	workDir := filepath.Join(base, "repos")
+	outside := filepath.Join(base, "repos2")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "outside of allowed WorkDir") {
-		t.Fatalf("expected %v to contain %v", err.Error(), "outside of allowed WorkDir")
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
+
+	svc := &Service{opts: ServiceOptions{WorkDir: workDir}}
+	_, err := svc.validatePath(outside)
+	assertServiceGitError(t, err, "outside of allowed WorkDir")
 }
 
 func TestService_ValidatePath_Bad_WorkDirNotAbsolute(t *testing.T) {
 	svc := &Service{opts: ServiceOptions{WorkDir: "relative/workdir"}}
-	err := svc.validatePath("/any/absolute/path")
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	_, err := svc.validatePath(t.TempDir())
+	assertServiceGitError(t, err, "WorkDir must be absolute")
+}
+
+func TestService_ValidatePath_Bad_SymlinkEscape(t *testing.T) {
+	workDir := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(workDir, "outside-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
 	}
-	if !strings.Contains(err.Error(), "WorkDir must be absolute") {
-		t.Fatalf("expected %v to contain %v", err.Error(), "WorkDir must be absolute")
-	}
+
+	svc := &Service{opts: ServiceOptions{WorkDir: workDir}}
+	_, err := svc.validatePath(link)
+	assertServiceGitError(t, err, "outside of allowed WorkDir")
 }
 
 func TestService_ValidatePath_Good_InsideWorkDir(t *testing.T) {
-	svc := &Service{opts: ServiceOptions{WorkDir: "/home/repos"}}
-	err := svc.validatePath("/home/repos/my-project")
+	workDir := t.TempDir()
+	repoDir := filepath.Join(workDir, "my-project")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	svc := &Service{opts: ServiceOptions{WorkDir: workDir}}
+	got, err := svc.validatePath(repoDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(repoDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("want %v, got %v", want, got)
 	}
 }
 
 func TestService_ValidatePath_Good_NoWorkDir(t *testing.T) {
 	svc := &Service{opts: ServiceOptions{}}
-	err := svc.validatePath("/any/absolute/path")
+	_, err := svc.validatePath("/any/absolute/path")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +143,6 @@ func TestService_Action_Bad_PushInvalidPath(t *testing.T) {
 	result := c.Action("git.push").Run(context.Background(), core.NewOptions(
 		core.Option{Key: "path", Value: "relative/path"},
 	))
-	_ = svc
 	if result.OK {
 		t.Fatal("expected false")
 	}
@@ -124,7 +160,6 @@ func TestService_Action_Bad_PullInvalidPath(t *testing.T) {
 	result := c.Action("git.pull").Run(context.Background(), core.NewOptions(
 		core.Option{Key: "path", Value: "/etc/passwd"},
 	))
-	_ = svc
 	if result.OK {
 		t.Fatal("expected false")
 	}
@@ -143,7 +178,6 @@ func TestService_Action_Bad_PushMultipleInvalidPath(t *testing.T) {
 	opts.Set("paths", []string{"/home/repos/ok", "/etc/bad"})
 	opts.Set("names", map[string]string{})
 	result := c.Action("git.push-multiple").Run(context.Background(), opts)
-	_ = svc
 	if result.OK {
 		t.Fatal("expected false")
 	}
@@ -162,10 +196,54 @@ func TestService_Action_Bad_PullMultipleInvalidPath(t *testing.T) {
 	opts.Set("paths", []string{"/home/repos/ok", "/etc/bad"})
 	opts.Set("names", map[string]string{})
 	result := c.Action("git.pull-multiple").Run(context.Background(), opts)
-	_ = svc
 	if result.OK {
 		t.Fatal("expected false")
 	}
+}
+
+func TestService_Action_Bad_PushMultipleInvalidPayload(t *testing.T) {
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+		opts:           ServiceOptions{},
+	}
+	svc.OnStartup(context.Background())
+
+	opts := core.NewOptions()
+	opts.Set("paths", []any{"/tmp/repo"})
+	result := c.Action("git.push-multiple").Run(context.Background(), opts)
+	if result.OK {
+		t.Fatal("expected false")
+	}
+	err, ok := result.Value.(error)
+	if !ok {
+		t.Fatalf("expected error, got %T", result.Value)
+	}
+	assertServiceGitError(t, err, "paths must be []string")
+}
+
+func TestService_Action_Bad_PullMultipleInvalidNames(t *testing.T) {
+	c := core.New()
+
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+		opts:           ServiceOptions{},
+	}
+	svc.OnStartup(context.Background())
+
+	opts := core.NewOptions()
+	opts.Set("paths", []string{})
+	opts.Set("names", []string{"bad"})
+	result := c.Action("git.pull-multiple").Run(context.Background(), opts)
+	if result.OK {
+		t.Fatal("expected false")
+	}
+	err, ok := result.Value.(error)
+	if !ok {
+		t.Fatalf("expected error, got %T", result.Value)
+	}
+	assertServiceGitError(t, err, "names must be map[string]string")
 }
 
 func TestNewService_Good(t *testing.T) {
@@ -424,9 +502,9 @@ func TestService_HandleTask_Bad_UnknownTask(t *testing.T) {
 	if result.OK {
 		t.Fatal("expected false")
 	}
-	err := result.Value.(error)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	err, ok := result.Value.(error)
+	if !ok {
+		t.Fatalf("expected error, got %T", result.Value)
 	}
 	if !strings.Contains(err.Error(), "unsupported task type") {
 		t.Fatalf("expected %v to contain %v", err.Error(), "unsupported task type")
@@ -564,7 +642,7 @@ func TestService_Action_Bad_PullNoRemote(t *testing.T) {
 	}
 }
 
-func TestService_Action_Good_PushMultiple(t *testing.T) {
+func TestService_Action_Bad_PushMultiple_NoRemote(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c := core.New()
@@ -578,7 +656,6 @@ func TestService_Action_Good_PushMultiple(t *testing.T) {
 	opts.Set("paths", []string{dir})
 	opts.Set("names", map[string]string{dir: "test"})
 	result := c.Action("git.push-multiple").Run(context.Background(), opts)
-	_ = svc
 
 	// PushMultiple returns results even when individual pushes fail, but the
 	// overall action should still report failure.
@@ -598,7 +675,7 @@ func TestService_Action_Good_PushMultiple(t *testing.T) {
 	}
 }
 
-func TestService_Action_Good_PullMultiple(t *testing.T) {
+func TestService_Action_Bad_PullMultiple_NoRemote(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c := core.New()
@@ -612,7 +689,6 @@ func TestService_Action_Good_PullMultiple(t *testing.T) {
 	opts.Set("paths", []string{dir})
 	opts.Set("names", map[string]string{dir: "test"})
 	result := c.Action("git.pull-multiple").Run(context.Background(), opts)
-	_ = svc
 
 	if result.OK {
 		t.Fatal("expected false")
@@ -635,7 +711,7 @@ func TestService_Action_Good_PullMultiple(t *testing.T) {
 	}
 }
 
-func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
+func TestService_HandleTask_Bad_PushMultiple(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c := core.New()
@@ -670,7 +746,7 @@ func TestService_HandleTask_Good_PushMultiple(t *testing.T) {
 	}
 }
 
-func TestService_HandleTask_Good_PullMultiple(t *testing.T) {
+func TestService_HandleTask_Bad_PullMultiple(t *testing.T) {
 	dir, _ := filepath.Abs(initTestRepo(t))
 
 	c := core.New()

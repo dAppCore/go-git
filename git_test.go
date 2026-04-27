@@ -2,29 +2,29 @@ package git
 
 import (
 	"context"
+	"errors"
+	"os"
 	"os/exec" // Note: test-only intrinsic - drives git CLI fixtures for repository setup.
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-
-	core "dappco.re/go/core"
 )
-
-func testFS() *core.Fs {
-	return (&core.Fs{}).New("/")
-}
 
 func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
-	if r := testFS().Write(path, content); !r.OK {
-		t.Fatalf("unexpected error: %v", r.Value)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func deleteTestPath(t *testing.T, path string) {
 	t.Helper()
-	if r := testFS().Delete(path); !r.OK {
-		t.Fatalf("unexpected error: %v", r.Value)
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -54,7 +54,7 @@ func configureTestGit(t *testing.T, dir string) {
 
 func commitTestFile(t *testing.T, dir, path, content, message string) {
 	t.Helper()
-	writeTestFile(t, core.JoinPath(dir, path), content)
+	writeTestFile(t, filepath.Join(dir, path), content)
 	runTestGit(t, dir, "add", path)
 	runTestGit(t, dir, "commit", "-m", message)
 }
@@ -79,7 +79,7 @@ func stageSymlink(t *testing.T, dir, path, target string) {
 
 func checkoutSymlink(t *testing.T, dir, path, target string) {
 	t.Helper()
-	deleteTestPath(t, core.JoinPath(dir, path))
+	deleteTestPath(t, filepath.Join(dir, path))
 	stageSymlink(t, dir, path, target)
 	runTestGit(t, dir, "checkout-index", "-f", path)
 }
@@ -150,6 +150,39 @@ func assertErrorContains(t *testing.T, err error, want string) {
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("expected %v to contain %v", err.Error(), want)
 	}
+}
+
+func assertGitError(t *testing.T, err error, wantArg string) *GitError {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var gitErr *GitError
+	if !errors.As(err, &gitErr) {
+		t.Fatalf("expected *GitError, got %T", err)
+	}
+	if wantArg != "" && !slices.Contains(gitErr.Args, wantArg) {
+		t.Fatalf("expected args %v to contain %v", gitErr.Args, wantArg)
+	}
+	if strings.TrimSpace(gitErr.Stderr) == "" {
+		t.Fatalf("expected non-empty stderr for %v", gitErr.Args)
+	}
+	return gitErr
+}
+
+func localSymlinkTarget(t *testing.T) string {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), "symlink-target")
+	writeTestFile(t, target, "symlink target")
+
+	probe := filepath.Join(t.TempDir(), "symlink-probe")
+	if err := os.Symlink(target, probe); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	if err := os.Remove(probe); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return target
 }
 
 func TestGit_RepoStatusIsDirty_Good(t *testing.T) {
@@ -275,12 +308,12 @@ func TestGit_GitErrorError_Good(t *testing.T) {
 	}{
 		{
 			name:     "stderr takes precedence",
-			err:      &GitError{Args: []string{"status"}, Err: core.NewError("exit 1"), Stderr: "fatal: not a git repository"},
+			err:      &GitError{Args: []string{"status"}, Err: errors.New("exit 1"), Stderr: "fatal: not a git repository"},
 			expected: "git command \"git status\" failed: fatal: not a git repository",
 		},
 		{
 			name:     "falls back to underlying error",
-			err:      &GitError{Args: []string{"status"}, Err: core.NewError("exit status 128"), Stderr: ""},
+			err:      &GitError{Args: []string{"status"}, Err: errors.New("exit status 128"), Stderr: ""},
 			expected: "git command \"git status\" failed: exit status 128",
 		},
 	}
@@ -305,7 +338,7 @@ func TestGit_GitErrorError_Bad(t *testing.T) {
 func TestGit_GitErrorError_Ugly(t *testing.T) {
 	err := &GitError{
 		Args:   []string{"status", "--short"},
-		Err:    core.NewError("fallback"),
+		Err:    errors.New("fallback"),
 		Stderr: "\n\tfatal: spaced stderr\n\n",
 	}
 	expected := "git command \"git status --short\" failed: fatal: spaced stderr"
@@ -315,7 +348,7 @@ func TestGit_GitErrorError_Ugly(t *testing.T) {
 }
 
 func TestGit_GitErrorUnwrap_Good(t *testing.T) {
-	inner := core.NewError("underlying error")
+	inner := errors.New("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
 	if got := gitErr.Unwrap(); inner != got {
 		t.Fatalf("want %v, got %v", inner, got)
@@ -330,18 +363,18 @@ func TestGit_GitErrorUnwrap_Bad(t *testing.T) {
 }
 
 func TestGit_GitErrorUnwrap_Ugly(t *testing.T) {
-	inner := core.NewError("underlying error")
+	inner := errors.New("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
-	if !core.Is(gitErr, inner) {
+	if !errors.Is(gitErr, inner) {
 		t.Fatal("expected wrapped error to match")
 	}
 }
 
 func TestGit_IsNonFastForward_Good(t *testing.T) {
 	tests := []error{
-		core.NewError("! [rejected] main -> main (non-fast-forward)"),
-		core.NewError("Updates were rejected because the remote contains work that you do not have locally. fetch first"),
-		core.NewError("Updates were rejected because the tip of your current branch is behind"),
+		errors.New("! [rejected] main -> main (non-fast-forward)"),
+		errors.New("Updates were rejected because the remote contains work that you do not have locally. fetch first"),
+		errors.New("Updates were rejected because the tip of your current branch is behind"),
 	}
 
 	for _, err := range tests {
@@ -354,8 +387,8 @@ func TestGit_IsNonFastForward_Good(t *testing.T) {
 func TestGit_IsNonFastForward_Bad(t *testing.T) {
 	tests := []error{
 		nil,
-		core.NewError("connection refused"),
-		core.NewError("authentication failed"),
+		errors.New("connection refused"),
+		errors.New("authentication failed"),
 	}
 
 	for _, err := range tests {
@@ -368,7 +401,7 @@ func TestGit_IsNonFastForward_Bad(t *testing.T) {
 func TestGit_IsNonFastForward_Ugly(t *testing.T) {
 	err := &GitError{
 		Args:   []string{"push"},
-		Err:    core.NewError("exit status 1"),
+		Err:    errors.New("exit status 1"),
 		Stderr: "UPDATES WERE REJECTED BECAUSE THE REMOTE CONTAINS WORK THAT YOU DO NOT HAVE LOCALLY. FETCH FIRST",
 	}
 	if !IsNonFastForward(err) {
@@ -425,7 +458,7 @@ func TestGit_IsModifiedStatus_Ugly(t *testing.T) {
 }
 
 func TestGit_IsNoUpstreamError_Good(t *testing.T) {
-	err := core.NewError("fatal: no upstream configured for branch")
+	err := errors.New("fatal: no upstream configured for branch")
 	if !isNoUpstreamError(err) {
 		t.Fatal("expected true")
 	}
@@ -434,7 +467,7 @@ func TestGit_IsNoUpstreamError_Good(t *testing.T) {
 func TestGit_IsNoUpstreamError_Bad(t *testing.T) {
 	tests := []error{
 		nil,
-		core.NewError("fatal: not a git repository"),
+		errors.New("fatal: not a git repository"),
 	}
 
 	for _, err := range tests {
@@ -445,7 +478,7 @@ func TestGit_IsNoUpstreamError_Bad(t *testing.T) {
 }
 
 func TestGit_IsNoUpstreamError_Ugly(t *testing.T) {
-	err := core.NewError("\nNO UPSTREAM branch configured\n")
+	err := errors.New("\nNO UPSTREAM branch configured\n")
 	if !isNoUpstreamError(err) {
 		t.Fatal("expected trimmed mixed-case message to match")
 	}
@@ -468,7 +501,7 @@ func TestGit_RequireAbsolutePath_Ugly(t *testing.T) {
 }
 
 func TestGit_ParseGitCount_Good(t *testing.T) {
-	got, err := parseGitCount("git.test", "ahead", "12\n")
+	got, err := parseGitCount("ahead", "12\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -478,12 +511,12 @@ func TestGit_ParseGitCount_Good(t *testing.T) {
 }
 
 func TestGit_ParseGitCount_Bad(t *testing.T) {
-	_, err := parseGitCount("git.test", "ahead", "not-a-number")
+	_, err := parseGitCount("ahead", "not-a-number")
 	assertErrorContains(t, err, "failed to parse ahead count")
 }
 
 func TestGit_ParseGitCount_Ugly(t *testing.T) {
-	got, err := parseGitCount("git.test", "behind", "\t0\n")
+	got, err := parseGitCount("behind", "\t0\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -506,7 +539,7 @@ func TestGit_GitCommand_Good(t *testing.T) {
 
 func TestGit_GitCommand_Bad(t *testing.T) {
 	t.Run("invalid dir", func(t *testing.T) {
-		_, err := gitCommand(context.Background(), core.JoinPath(t.TempDir(), "missing"), "status")
+		_, err := gitCommand(context.Background(), filepath.Join(t.TempDir(), "missing"), "status")
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -520,7 +553,7 @@ func TestGit_GitCommand_Bad(t *testing.T) {
 		}
 
 		var gitErr *GitError
-		if !core.As(err, &gitErr) {
+		if !errors.As(err, &gitErr) {
 			t.Fatalf("expected GitError, got %T", err)
 		}
 		if !strings.Contains(gitErr.Stderr, "not a git repository") {
@@ -534,6 +567,7 @@ func TestGit_GitCommand_Bad(t *testing.T) {
 	t.Run("relative path", func(t *testing.T) {
 		_, err := gitCommand(context.Background(), "relative/path", "status")
 		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
 	})
 }
 
@@ -569,6 +603,7 @@ func TestGit_Push_Bad(t *testing.T) {
 	t.Run("relative path", func(t *testing.T) {
 		err := Push(context.Background(), "relative/path")
 		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
 	})
 
 	t.Run("no remote", func(t *testing.T) {
@@ -608,6 +643,7 @@ func TestGit_Pull_Bad(t *testing.T) {
 	t.Run("relative path", func(t *testing.T) {
 		err := Pull(context.Background(), "relative/path")
 		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
 	})
 
 	t.Run("no remote", func(t *testing.T) {
@@ -651,7 +687,7 @@ func TestGit_GetStatus_Good(t *testing.T) {
 
 	t.Run("modified file", func(t *testing.T) {
 		dir := initTestRepo(t)
-		writeTestFile(t, core.JoinPath(dir, "README.md"), "# Modified\n")
+		writeTestFile(t, filepath.Join(dir, "README.md"), "# Modified\n")
 
 		status := getStatus(context.Background(), dir, "modified-repo")
 		if status.Error != nil {
@@ -667,7 +703,7 @@ func TestGit_GetStatus_Good(t *testing.T) {
 
 	t.Run("untracked file", func(t *testing.T) {
 		dir := initTestRepo(t)
-		writeTestFile(t, core.JoinPath(dir, "newfile.txt"), "hello")
+		writeTestFile(t, filepath.Join(dir, "newfile.txt"), "hello")
 
 		status := getStatus(context.Background(), dir, "untracked-repo")
 		if status.Error != nil {
@@ -683,7 +719,7 @@ func TestGit_GetStatus_Good(t *testing.T) {
 
 	t.Run("staged file", func(t *testing.T) {
 		dir := initTestRepo(t)
-		writeTestFile(t, core.JoinPath(dir, "staged.txt"), "staged")
+		writeTestFile(t, filepath.Join(dir, "staged.txt"), "staged")
 		runTestGit(t, dir, "add", "staged.txt")
 
 		status := getStatus(context.Background(), dir, "staged-repo")
@@ -700,9 +736,9 @@ func TestGit_GetStatus_Good(t *testing.T) {
 
 	t.Run("mixed changes", func(t *testing.T) {
 		dir := initTestRepo(t)
-		writeTestFile(t, core.JoinPath(dir, "untracked.txt"), "new")
-		writeTestFile(t, core.JoinPath(dir, "README.md"), "# Changed\n")
-		writeTestFile(t, core.JoinPath(dir, "staged.txt"), "staged")
+		writeTestFile(t, filepath.Join(dir, "untracked.txt"), "new")
+		writeTestFile(t, filepath.Join(dir, "README.md"), "# Changed\n")
+		writeTestFile(t, filepath.Join(dir, "staged.txt"), "staged")
 		runTestGit(t, dir, "add", "staged.txt")
 
 		status := getStatus(context.Background(), dir, "mixed-repo")
@@ -722,7 +758,7 @@ func TestGit_GetStatus_Good(t *testing.T) {
 
 	t.Run("deleted tracked file", func(t *testing.T) {
 		dir := initTestRepo(t)
-		deleteTestPath(t, core.JoinPath(dir, "README.md"))
+		deleteTestPath(t, filepath.Join(dir, "README.md"))
 
 		status := getStatus(context.Background(), dir, "deleted-repo")
 		if status.Error != nil {
@@ -749,7 +785,7 @@ func TestGit_GetStatus_Good(t *testing.T) {
 
 func TestGit_GetStatus_Bad(t *testing.T) {
 	t.Run("invalid path", func(t *testing.T) {
-		status := getStatus(context.Background(), core.JoinPath(t.TempDir(), "missing"), "bad-repo")
+		status := getStatus(context.Background(), filepath.Join(t.TempDir(), "missing"), "bad-repo")
 		if status.Error == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -835,7 +871,7 @@ func TestGit_GetStatus_Ugly(t *testing.T) {
 
 	t.Run("type changed file in working tree", func(t *testing.T) {
 		dir := initTestRepo(t)
-		replaceWorkingTreeWithSymlink(t, dir, "README.md", "/etc/hosts")
+		replaceWorkingTreeWithSymlink(t, dir, "README.md", localSymlinkTarget(t))
 
 		status := getStatus(context.Background(), dir, "typechanged-working-tree")
 		if status.Error != nil {
@@ -848,7 +884,7 @@ func TestGit_GetStatus_Ugly(t *testing.T) {
 
 	t.Run("type changed file staged", func(t *testing.T) {
 		dir := initTestRepo(t)
-		checkoutSymlink(t, dir, "README.md", "/etc/hosts")
+		checkoutSymlink(t, dir, "README.md", localSymlinkTarget(t))
 
 		status := getStatus(context.Background(), dir, "typechanged-staged")
 		if status.Error != nil {
@@ -875,7 +911,7 @@ func TestGit_GetStatus_Ugly(t *testing.T) {
 func TestGit_Status_Good(t *testing.T) {
 	dir1 := initTestRepo(t)
 	dir2 := initTestRepo(t)
-	writeTestFile(t, core.JoinPath(dir2, "extra.txt"), "extra")
+	writeTestFile(t, filepath.Join(dir2, "extra.txt"), "extra")
 
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{dir1, dir2},
@@ -910,7 +946,7 @@ func TestGit_Status_Good(t *testing.T) {
 
 func TestGit_Status_Bad(t *testing.T) {
 	validDir := initTestRepo(t)
-	invalidDir := core.JoinPath(t.TempDir(), "missing")
+	invalidDir := filepath.Join(t.TempDir(), "missing")
 
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{validDir, invalidDir, "relative/path"},
@@ -932,6 +968,7 @@ func TestGit_Status_Bad(t *testing.T) {
 	if results[2].Error == nil {
 		t.Fatal("expected error for relative path")
 	}
+	assertGitError(t, results[2].Error, "relative/path")
 }
 
 func TestGit_Status_Ugly(t *testing.T) {
@@ -973,7 +1010,7 @@ func TestGit_Status_Ugly(t *testing.T) {
 func TestGit_StatusIter_Good(t *testing.T) {
 	dir1 := initTestRepo(t)
 	dir2 := initTestRepo(t)
-	writeTestFile(t, core.JoinPath(dir2, "extra.txt"), "extra")
+	writeTestFile(t, filepath.Join(dir2, "extra.txt"), "extra")
 
 	statuses := slices.Collect(StatusIter(context.Background(), StatusOptions{
 		Paths: []string{dir1, dir2},
@@ -1011,6 +1048,7 @@ func TestGit_StatusIter_Bad(t *testing.T) {
 	if statuses[0].Error == nil {
 		t.Fatal("expected error, got nil")
 	}
+	assertGitError(t, statuses[0].Error, "relative/path")
 }
 
 func TestGit_StatusIter_Ugly(t *testing.T) {
@@ -1074,6 +1112,7 @@ func TestGit_GetAheadBehind_Bad(t *testing.T) {
 	t.Run("relative path", func(t *testing.T) {
 		_, _, err := getAheadBehind(context.Background(), "relative/path")
 		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
 	})
 
 	t.Run("not a repo", func(t *testing.T) {
@@ -1130,6 +1169,8 @@ func TestGit_PushMultiple_Bad(t *testing.T) {
 			t.Fatalf("want %v, got %v", 1, len(results))
 		}
 		assertErrorContains(t, results[0].Error, "path must be absolute")
+		assertGitError(t, results[0].Error, "relative/repo")
+		assertGitError(t, err, "relative/repo")
 	})
 
 	t.Run("no remote", func(t *testing.T) {
@@ -1211,6 +1252,8 @@ func TestGit_PullMultiple_Bad(t *testing.T) {
 			t.Fatalf("want %v, got %v", 1, len(results))
 		}
 		assertErrorContains(t, results[0].Error, "path must be absolute")
+		assertGitError(t, results[0].Error, "relative/repo")
+		assertGitError(t, err, "relative/repo")
 	})
 
 	t.Run("no remote", func(t *testing.T) {

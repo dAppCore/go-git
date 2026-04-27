@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -341,45 +342,76 @@ func TestService_QueryStatus_Ugly(t *testing.T) {
 }
 
 func TestService_QueryBehindRepos_Good(t *testing.T) {
-	var q QueryBehindRepos
-	if reflect.TypeOf(QueryBehindRepos{}) != reflect.TypeOf(q) {
-		t.Fatalf("want %T, got %T", QueryBehindRepos{}, q)
+	s := &Service{
+		lastStatus: []RepoStatus{
+			{Name: "synced"},
+			{Name: "behind", Behind: 2},
+			{Name: "ahead", Ahead: 2},
+		},
+	}
+
+	behind := s.BehindRepos()
+	if len(behind) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(behind))
+	}
+	if "behind" != behind[0].Name {
+		t.Fatalf("want %v, got %v", "behind", behind[0].Name)
 	}
 }
 
 func TestService_QueryBehindRepos_Bad(t *testing.T) {
-	if reflect.TypeOf(QueryBehindRepos{}) == reflect.TypeOf(QueryAheadRepos{}) {
-		t.Fatalf("marker query types should remain distinct")
+	s := &Service{
+		lastStatus: []RepoStatus{
+			{Name: "behind-error", Behind: 1, Error: errors.New("status failed")},
+			{Name: "behind-negative", Behind: -1},
+		},
+	}
+
+	if behind := s.BehindRepos(); len(behind) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(behind))
 	}
 }
 
 func TestService_QueryBehindRepos_Ugly(t *testing.T) {
-	if !reflect.DeepEqual(QueryBehindRepos{}, QueryBehindRepos{}) {
-		t.Fatal("zero-value marker queries should compare equal")
+	s := &Service{}
+	if behind := s.BehindRepos(); len(behind) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(behind))
 	}
 }
 
 func TestService_TaskPullMultiple_Good(t *testing.T) {
-	task := TaskPullMultiple{
-		Paths: []string{"/repo/a", "/repo/b"},
-		Names: map[string]string{"/repo/a": "repo-a"},
-	}
+	s := &Service{}
 
-	if !slices.Equal(task.Paths, []string{"/repo/a", "/repo/b"}) {
-		t.Fatalf("want %v, got %v", []string{"/repo/a", "/repo/b"}, task.Paths)
+	result := s.runPullMultiple(context.Background(), []string{}, nil)
+	if !result.OK {
+		t.Fatalf("expected true, got %v", result.Value)
 	}
-	if task.Names["/repo/a"] != "repo-a" {
-		t.Fatalf("want %v, got %v", "repo-a", task.Names["/repo/a"])
+	pulls, ok := result.Value.([]PullResult)
+	if !ok {
+		t.Fatalf("expected []PullResult, got %T", result.Value)
+	}
+	if len(pulls) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(pulls))
 	}
 }
 
 func TestService_TaskPullMultiple_Bad(t *testing.T) {
-	var task TaskPullMultiple
-	if task.Paths != nil {
-		t.Fatalf("expected nil paths, got %v", task.Paths)
+	s := &Service{}
+
+	result := s.runPullMultiple(context.Background(), []string{"relative/path"}, nil)
+	if result.OK {
+		t.Fatal("expected false")
 	}
-	if task.Names != nil {
-		t.Fatalf("expected nil names, got %v", task.Names)
+	err, ok := result.Value.(error)
+	if !ok {
+		t.Fatalf("expected error, got %T", result.Value)
+	}
+	var gitErr *GitError
+	if !errors.As(err, &gitErr) {
+		t.Fatalf("expected *GitError, got %T", err)
+	}
+	if !slices.Contains(gitErr.Args, "path=relative/path") {
+		t.Fatalf("expected args %v to contain relative path", gitErr.Args)
 	}
 }
 
