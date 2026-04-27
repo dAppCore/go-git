@@ -62,6 +62,19 @@ type PushResult struct {
 }
 ```
 
+### PullResult
+
+Returned by `PullMultiple`, one per repository:
+
+```go
+type PullResult struct {
+    Name    string
+    Path    string
+    Success bool
+    Error   error
+}
+```
+
 ## Data flow
 
 ### Parallel status checking
@@ -88,10 +101,10 @@ The `--porcelain` output is parsed character by character. Each line has a two-c
 | Position X (index) | Position Y (working tree) | Interpretation |
 |---------------------|---------------------------|----------------|
 | `?` | `?` | Untracked file |
-| `A`, `D`, `R`, `M` | any | Staged change |
-| any | `M`, `D` | Working tree modification |
+| `A`, `D`, `R`, `M`, `U` | any | Staged change |
+| any | `M`, `D`, `U` | Working tree modification |
 
-A single file can increment both `Staged` and `Modified` if it has been staged and then further modified.
+A single file can increment both `Staged` and `Modified` if it has been staged and then further modified. Unmerged paths (`U`) increment both counters, which keeps conflicted repositories visibly dirty.
 
 ### Interactive push and pull
 
@@ -129,13 +142,35 @@ The factory constructs a `Service` embedding `core.ServiceRuntime[ServiceOptions
 
 ### Lifecycle
 
-`Service` implements the `Startable` interface. On startup, it registers a query handler and a task handler with the Core message bus:
+`Service` implements the `Startable` interface. On startup, it registers the query/task bridge handlers and named Core actions for direct action-bus callers:
 
 ```go
-func (s *Service) OnStartup(ctx context.Context) error {
+func (s *Service) OnStartup(ctx context.Context) core.Result {
     s.Core().RegisterQuery(s.handleQuery)
-    s.Core().RegisterTask(s.handleTask)
-    return nil
+    s.Core().RegisterAction(s.handleTaskMessage)
+
+    s.Core().Action("git.push", func(ctx context.Context, opts core.Options) core.Result {
+        return s.runPush(ctx, opts.String("path"))
+    })
+    s.Core().Action("git.pull", func(ctx context.Context, opts core.Options) core.Result {
+        return s.runPull(ctx, opts.String("path"))
+    })
+    s.Core().Action("git.push-multiple", func(ctx context.Context, opts core.Options) core.Result {
+        paths, names, err := multipleActionPayload(opts, "git.push-multiple")
+        if err != nil {
+            return s.logError(err, "git.push-multiple", "invalid action payload")
+        }
+        return s.runPushMultiple(ctx, paths, names)
+    })
+    s.Core().Action("git.pull-multiple", func(ctx context.Context, opts core.Options) core.Result {
+        paths, names, err := multipleActionPayload(opts, "git.pull-multiple")
+        if err != nil {
+            return s.logError(err, "git.pull-multiple", "invalid action payload")
+        }
+        return s.runPullMultiple(ctx, paths, names)
+    })
+
+    return core.Result{OK: true}
 }
 ```
 
@@ -146,6 +181,7 @@ func (s *Service) OnStartup(ctx context.Context) error {
 | `QueryStatus` | `[]RepoStatus` | Checks Git status for a set of paths (runs in parallel). Updates the cached `lastStatus`. |
 | `QueryDirtyRepos` | `[]RepoStatus` | Filters `lastStatus` for repos with uncommitted changes. |
 | `QueryAheadRepos` | `[]RepoStatus` | Filters `lastStatus` for repos with unpushed commits. |
+| `QueryBehindRepos` | `[]RepoStatus` | Filters `lastStatus` for repos with unpulled commits. |
 
 `QueryStatus` has the same fields as `StatusOptions` and can be type-converted directly:
 
@@ -160,26 +196,36 @@ statuses := Status(ctx, StatusOptions(queryStatus))
 | `TaskPush` | `nil` | Pushes a single repository (interactive). |
 | `TaskPull` | `nil` | Pulls a single repository with `--rebase` (interactive). |
 | `TaskPushMultiple` | `[]PushResult` | Pushes multiple repositories sequentially. |
+| `TaskPullMultiple` | `[]PullResult` | Pulls multiple repositories sequentially with `--rebase`. |
 
 ### Path validation
 
 All query and task handlers validate paths before execution:
 
 1. Paths must be absolute (rejects relative paths).
-2. If `ServiceOptions.WorkDir` is set, all paths must be descendants of that directory. This prevents directory traversal.
+2. If `ServiceOptions.WorkDir` is set, both `WorkDir` and the target path are resolved through symlinks before the boundary check.
+3. Validation failures return `*GitError` with command context in `Args` and a diagnostic message in `Stderr`.
 
 ```go
-func (s *Service) validatePath(path string) error {
+func (s *Service) validatePath(path string) (string, error) {
     if !filepath.IsAbs(path) {
-        return fmt.Errorf("path must be absolute: %s", path)
+        return "", gitValidationError("path must be absolute: "+path, path, s.opts.WorkDir, nil)
     }
     if s.opts.WorkDir != "" {
-        rel, err := filepath.Rel(s.opts.WorkDir, path)
-        if err != nil || strings.HasPrefix(rel, "..") {
-            return fmt.Errorf("path %s is outside of allowed WorkDir %s", path, s.opts.WorkDir)
+        resolvedWorkDir, err := filepath.EvalSymlinks(s.opts.WorkDir)
+        if err != nil {
+            return "", gitValidationError("failed to resolve WorkDir: "+s.opts.WorkDir, path, s.opts.WorkDir, err)
         }
+        resolvedPath, err := filepath.EvalSymlinks(path)
+        if err != nil {
+            return "", gitValidationError("failed to resolve path: "+path, path, s.opts.WorkDir, err)
+        }
+        if !pathWithinWorkDir(resolvedPath, resolvedWorkDir) {
+            return "", gitValidationError("path is outside of allowed WorkDir", path, s.opts.WorkDir, nil)
+        }
+        return resolvedPath, nil
     }
-    return nil
+    return filepath.Clean(path), nil
 }
 ```
 
@@ -193,10 +239,12 @@ The `Service` caches the most recent `QueryStatus` result in `lastStatus` (prote
 | `All()` | `iter.Seq[RepoStatus]` | Iterator over all cached statuses. |
 | `Dirty()` | `iter.Seq[RepoStatus]` | Iterator over repos where `IsDirty()` is true and `Error` is nil. |
 | `Ahead()` | `iter.Seq[RepoStatus]` | Iterator over repos where `HasUnpushed()` is true and `Error` is nil. |
+| `Behind()` | `iter.Seq[RepoStatus]` | Iterator over repos where `HasUnpulled()` is true and `Error` is nil. |
 | `DirtyRepos()` | `[]RepoStatus` | Collects `Dirty()` into a slice. |
 | `AheadRepos()` | `[]RepoStatus` | Collects `Ahead()` into a slice. |
+| `BehindRepos()` | `[]RepoStatus` | Collects `Behind()` into a slice. |
 
-Errored repositories are excluded from `Dirty()` and `Ahead()` iterators.
+Errored repositories are excluded from `Dirty()`, `Ahead()`, and `Behind()` iterators.
 
 ## Concurrency model
 

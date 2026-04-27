@@ -5,7 +5,7 @@ description: Multi-repository Git operations library for Go with parallel status
 
 # go-git
 
-**Module:** `forge.lthn.ai/core/go-git`
+**Module:** `dappco.re/go/git`
 
 **Go version:** 1.26+
 
@@ -13,12 +13,12 @@ description: Multi-repository Git operations library for Go with parallel status
 
 ## What it does
 
-go-git is a Go library for orchestrating Git operations across multiple repositories. It was extracted from `forge.lthn.ai/core/go-scm/git/` into a standalone module.
+go-git is a Go library for orchestrating Git operations across multiple repositories. It was extracted from `dappco.re/go/core/scm/git/` into a standalone module.
 
 The library provides two layers:
 
 1. **Standalone functions** -- pure Git operations that depend only on the standard library.
-2. **Core service integration** -- a `Service` type that plugs into the Core DI framework, exposing Git operations via the query/task message bus.
+2. **Core service integration** -- a `Service` type that plugs into the Core DI framework, exposing Git operations via the query/action message bus.
 
 Typical use cases include multi-repo status dashboards, batch push/pull workflows, and CI tooling that needs to inspect many repositories at once.
 
@@ -33,7 +33,7 @@ import (
     "context"
     "fmt"
 
-    git "forge.lthn.ai/core/go-git"
+    git "dappco.re/go/git"
 )
 
 func main() {
@@ -64,8 +64,8 @@ package main
 import (
     "fmt"
 
-    "forge.lthn.ai/core/go/pkg/core"
-    git "forge.lthn.ai/core/go-git"
+    "dappco.re/go/core"
+    git "dappco.re/go/git"
 )
 
 func main() {
@@ -89,7 +89,7 @@ func main() {
 
     statuses := result.([]git.RepoStatus)
     for _, s := range statuses {
-        fmt.Printf("%s: dirty=%v ahead=%v\n", s.Name, s.IsDirty(), s.HasUnpushed())
+        fmt.Printf("%s: dirty=%v ahead=%v behind=%v\n", s.Name, s.IsDirty(), s.HasUnpushed(), s.HasUnpulled())
     }
 }
 ```
@@ -98,18 +98,17 @@ func main() {
 
 | File | Purpose |
 |------|---------|
-| `git.go` | Standalone Git operations -- `Status`, `Push`, `Pull`, `PushMultiple`, error types. Zero framework dependencies. |
-| `service.go` | Core framework integration -- `Service`, query types (`QueryStatus`, `QueryDirtyRepos`, `QueryAheadRepos`), task types (`TaskPush`, `TaskPull`, `TaskPushMultiple`). |
+| `git.go` | Standalone Git operations -- `Status`, `StatusIter`, `Push`, `Pull`, `PushMultiple`, `PushMultipleIter`, `PullMultiple`, `PullMultipleIter`, error types. Zero framework dependencies. |
+| `service.go` | Core framework integration -- `Service`, query types (`QueryStatus`, `QueryDirtyRepos`, `QueryAheadRepos`, `QueryBehindRepos`), task types (`TaskPush`, `TaskPull`, `TaskPushMultiple`, `TaskPullMultiple`). |
 | `git_test.go` | Tests for standalone operations using real temporary Git repositories. |
-| `service_test.go` | Tests for `Service` filtering helpers (`DirtyRepos`, `AheadRepos`, iterators). |
+| `service_test.go` | Tests for `Service` filtering helpers (`DirtyRepos`, `AheadRepos`, `BehindRepos`, iterators). |
 | `service_extra_test.go` | Integration tests for `Service` query/task handlers against the Core framework. |
 
 ## Dependencies
 
 | Dependency | Purpose |
 |------------|---------|
-| `forge.lthn.ai/core/go/pkg/core` | DI container, `ServiceRuntime`, query/task bus (used only by `service.go`). |
-| `github.com/stretchr/testify` | Assertions in tests (test-only). |
+| `dappco.re/go/core` | DI container, `ServiceRuntime`, query/action bus (used only by `service.go`). |
 
 The standalone layer (`git.go`) uses only the Go standard library. It shells out to the system `git` binary -- there is no embedded Git implementation.
 

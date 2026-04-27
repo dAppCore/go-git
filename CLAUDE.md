@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Multi-repository git operations library. Parallel status checks, sequential push/pull (for SSH passphrase prompts), error handling with stderr capture.
 
-**Module:** `forge.lthn.ai/core/go-git`
+**Module:** `dappco.re/go/git`
 **Go:** 1.26+
 
 ## Build & Test
@@ -21,7 +21,7 @@ golangci-lint run ./...    # Lint (see .golangci.yml for enabled linters)
 
 Two files:
 - `git.go` — Core operations: Status, Push, Pull, PushMultiple. Stdlib only, no framework dependency.
-- `service.go` — Core framework integration via `dappco.re/go/core`. Exposes query types (QueryStatus, QueryDirtyRepos, QueryAheadRepos) and task types (TaskPush, TaskPull, TaskPushMultiple). Service uses `core.ServiceRuntime` with query/task handler registration in `OnStartup`. Also provides iterator methods (All, Dirty, Ahead) using `iter.Seq`.
+- `service.go` — Core framework integration via `dappco.re/go/core`. Exposes query types (QueryStatus, QueryDirtyRepos, QueryAheadRepos, QueryBehindRepos) and task types (TaskPush, TaskPull, TaskPushMultiple, TaskPullMultiple). Service uses `core.ServiceRuntime` with query and action handler registration in `OnStartup`. Also provides iterator methods (All, Dirty, Ahead, Behind) using `iter.Seq`.
 
 ## Key Design Decisions
 
@@ -43,8 +43,8 @@ Two files:
 - `Co-Authored-By: Virgil <virgil@lethean.io>` in commits
 - Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
-## Forge Remote
+## GitHub Remote
 
 ```bash
-git remote add forge ssh://git@forge.lthn.ai:2223/core/go-git.git
+git remote add origin git@github.com:dAppCore/go-git.git
 ```

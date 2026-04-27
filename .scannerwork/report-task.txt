@@ -1,0 +1,6 @@
+projectKey=core-go-git
+serverUrl=https://sonar.lthn.sh
+serverVersion=26.4.0.121862
+dashboardUrl=https://sonar.lthn.sh/dashboard?id=core-go-git
+ceTaskId=c8c81137-edce-47f4-86f8-548c584fb8c7
+ceTaskUrl=https://sonar.lthn.sh/api/ce/task?id=c8c81137-edce-47f4-86f8-548c584fb8c7

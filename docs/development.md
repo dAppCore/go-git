@@ -11,7 +11,7 @@ description: How to build, test, lint, and contribute to go-git.
 - **Git** (system binary -- the library shells out to `git`)
 - **golangci-lint** (for linting)
 
-go-git is part of the Go workspace at `~/Code/go.work`. If you are working within that workspace, module resolution is handled automatically. Otherwise, ensure `GOPRIVATE=forge.lthn.ai/*` is set so Go can fetch private modules.
+go-git is part of the Go workspace at `~/Code/go.work`. If you are working within that workspace, module resolution is handled automatically. Otherwise, ensure `GOPRIVATE=dappco.re/*` is set so Go can fetch private modules.
 
 ## Running tests
 
@@ -121,13 +121,13 @@ go-git/
 core go qa full
 ```
 
-## Forge remote
+## GitHub remote
 
-The canonical repository is on Forgejo. Push via SSH:
+The canonical repository is on GitHub. Push via SSH:
 
 ```bash
-git remote add forge ssh://git@forge.lthn.ai:2223/core/go-git.git
-git push forge main
+git remote add origin git@github.com:dAppCore/go-git.git
+git push origin main
 ```
 
 HTTPS authentication is not supported for pushes.

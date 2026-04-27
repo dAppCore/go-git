@@ -1,0 +1,24 @@
+version: "3"
+
+tasks:
+  default:
+    deps: [test]
+
+  test:
+    desc: Validate the go-git AX-10 CLI artifact driver.
+    dir: ../../..
+    cmds:
+      - |
+        export GOCACHE="${GOCACHE:-/tmp/go-git-gocache}"
+        export GOMODCACHE="${GOMODCACHE:-/tmp/go-git-gomodcache}"
+        mkdir -p "$GOCACHE" "$GOMODCACHE"
+        bin="$(mktemp -t core-git.XXXXXX)"
+        trap 'rm -f "$bin"' EXIT
+        go build -o "$bin" ./tests/cli/git
+        "$bin"
+
+  driver:
+    desc: Run the go-git AX-10 driver directly.
+    dir: ../../..
+    cmds:
+      - go run ./tests/cli/git

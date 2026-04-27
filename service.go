@@ -2,11 +2,11 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 
 	"dappco.re/go/core"
 )
@@ -24,6 +24,9 @@ type QueryDirtyRepos struct{}
 
 // QueryAheadRepos requests repos with unpushed commits.
 type QueryAheadRepos struct{}
+
+// QueryBehindRepos requests repos with unpulled commits.
+type QueryBehindRepos struct{}
 
 // Tasks for git service
 
@@ -45,6 +48,12 @@ type TaskPushMultiple struct {
 	Names map[string]string
 }
 
+// TaskPullMultiple requests git pull for multiple paths.
+type TaskPullMultiple struct {
+	Paths []string
+	Names map[string]string
+}
+
 // ServiceOptions for configuring the git service.
 type ServiceOptions struct {
 	WorkDir string
@@ -57,9 +66,16 @@ var _ core.Startable = (*Service)(nil)
 type Service struct {
 	*core.ServiceRuntime[ServiceOptions]
 	opts       ServiceOptions
-	mu         sync.RWMutex
 	lastStatus []RepoStatus
 }
+
+const (
+	actionGitPush         = "git.push"
+	actionGitPull         = "git.pull"
+	actionGitPushMultiple = "git.push-multiple"
+	actionGitPullMultiple = "git.pull-multiple"
+	statusLockName        = "git.status"
+)
 
 // NewService creates a git service factory.
 func NewService(opts ServiceOptions) func(*core.Core) (any, error) {
@@ -71,30 +87,75 @@ func NewService(opts ServiceOptions) func(*core.Core) (any, error) {
 	}
 }
 
-// OnStartup registers query and task handlers.
-func (s *Service) OnStartup(ctx context.Context) error {
+// OnStartup registers query and action handlers.
+func (s *Service) OnStartup(ctx context.Context) core.Result {
 	s.Core().RegisterQuery(s.handleQuery)
-	s.Core().RegisterTask(s.handleTask)
-	return nil
+	s.Core().RegisterAction(s.handleTaskMessage)
+
+	s.Core().Action(actionGitPush, func(ctx context.Context, opts core.Options) core.Result {
+		path := opts.String("path")
+		return s.runPush(ctx, path)
+	})
+
+	s.Core().Action(actionGitPull, func(ctx context.Context, opts core.Options) core.Result {
+		path := opts.String("path")
+		return s.runPull(ctx, path)
+	})
+
+	s.Core().Action(actionGitPushMultiple, func(ctx context.Context, opts core.Options) core.Result {
+		paths, names, err := multipleActionPayload(opts, actionGitPushMultiple)
+		if err != nil {
+			return s.logError(err, actionGitPushMultiple, "invalid action payload")
+		}
+		return s.runPushMultiple(ctx, paths, names)
+	})
+
+	s.Core().Action(actionGitPullMultiple, func(ctx context.Context, opts core.Options) core.Result {
+		paths, names, err := multipleActionPayload(opts, actionGitPullMultiple)
+		if err != nil {
+			return s.logError(err, actionGitPullMultiple, "invalid action payload")
+		}
+		return s.runPullMultiple(ctx, paths, names)
+	})
+
+	return core.Result{OK: true}
+}
+
+// handleTaskMessage bridges task structs onto the Core action bus.
+func (s *Service) handleTaskMessage(c *core.Core, msg core.Message) core.Result {
+	switch m := msg.(type) {
+	case TaskPush:
+		return s.handleTask(c, m)
+	case TaskPull:
+		return s.handleTask(c, m)
+	case TaskPushMultiple:
+		return s.handleTask(c, m)
+	case TaskPullMultiple:
+		return s.handleTask(c, m)
+	default:
+		return core.Result{}
+	}
 }
 
 func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
-	ctx := context.Background() // TODO: core should pass context to handlers
+	ctx := c.Context()
 
 	switch m := q.(type) {
 	case QueryStatus:
-		// Validate all paths before execution
-		for _, path := range m.Paths {
-			if err := s.validatePath(path); err != nil {
-				return c.LogError(err, "git.handleQuery", "path validation failed")
-			}
+		paths, err := s.validatePaths(m.Paths)
+		if err != nil {
+			return c.LogError(err, "git.handleQuery", "path validation failed")
 		}
 
-		statuses := Status(ctx, StatusOptions(m))
+		statuses := Status(ctx, StatusOptions{
+			Paths: paths,
+			Names: resolvedNames(m.Paths, paths, m.Names),
+		})
 
-		s.mu.Lock()
+		statusLock := c.Lock(statusLockName)
+		statusLock.Mutex.Lock()
 		s.lastStatus = statuses
-		s.mu.Unlock()
+		statusLock.Mutex.Unlock()
 
 		return core.Result{Value: statuses, OK: true}
 
@@ -103,109 +164,271 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 
 	case QueryAheadRepos:
 		return core.Result{Value: s.AheadRepos(), OK: true}
+	case QueryBehindRepos:
+		return core.Result{Value: s.BehindRepos(), OK: true}
 	}
 	return core.Result{}
 }
 
-func (s *Service) handleTask(c *core.Core, t core.Task) core.Result {
-	ctx := context.Background() // TODO: core should pass context to handlers
+func (s *Service) handleTask(c *core.Core, t any) core.Result {
+	ctx := c.Context()
 
 	switch m := t.(type) {
 	case TaskPush:
-		if err := s.validatePath(m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "path validation failed")
-		}
-		if err := Push(ctx, m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "push failed")
-		}
-		return core.Result{OK: true}
+		return s.runPush(ctx, m.Path)
 
 	case TaskPull:
-		if err := s.validatePath(m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "path validation failed")
-		}
-		if err := Pull(ctx, m.Path); err != nil {
-			return c.LogError(err, "git.handleTask", "pull failed")
-		}
-		return core.Result{OK: true}
+		return s.runPull(ctx, m.Path)
 
 	case TaskPushMultiple:
-		for _, path := range m.Paths {
-			if err := s.validatePath(path); err != nil {
-				return c.LogError(err, "git.handleTask", "path validation failed")
-			}
-		}
-		results, err := PushMultiple(ctx, m.Paths, m.Names)
-		if err != nil {
-			// Log for observability; partial results are still returned.
-			_ = c.LogError(err, "git.handleTask", "push multiple had failures")
-		}
-		return core.Result{Value: results, OK: true}
+		return s.runPushMultiple(ctx, m.Paths, m.Names)
+
+	case TaskPullMultiple:
+		return s.runPullMultiple(ctx, m.Paths, m.Names)
 	}
-	return core.Result{}
+
+	return c.LogError(gitServiceError("git.handleTask", "unsupported task type", nil), "git.handleTask", "unsupported task type")
 }
 
-func (s *Service) validatePath(path string) error {
-	if !filepath.IsAbs(path) {
-		return core.E("git.validatePath", "path must be absolute: "+path, nil)
+func (s *Service) runPush(ctx context.Context, path string) core.Result {
+	path, err := s.validatePath(path)
+	if err != nil {
+		return s.logError(err, "git.push", "path validation failed")
+	}
+	if err := Push(ctx, path); err != nil {
+		return s.logError(err, "git.push", "push failed")
+	}
+	return core.Result{OK: true}
+}
+
+func (s *Service) runPull(ctx context.Context, path string) core.Result {
+	path, err := s.validatePath(path)
+	if err != nil {
+		return s.logError(err, "git.pull", "path validation failed")
+	}
+	if err := Pull(ctx, path); err != nil {
+		return s.logError(err, "git.pull", "pull failed")
+	}
+	return core.Result{OK: true}
+}
+
+func (s *Service) runPushMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
+	resolvedPaths, err := s.validatePaths(paths)
+	if err != nil {
+		return s.logError(err, "git.push-multiple", "path validation failed")
+	}
+	results, err := PushMultiple(ctx, resolvedPaths, resolvedNames(paths, resolvedPaths, names))
+	if err != nil {
+		_ = s.logError(err, "git.push-multiple", "push multiple had failures")
+	}
+	return core.Result{Value: results, OK: err == nil}
+}
+
+func (s *Service) runPullMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
+	resolvedPaths, err := s.validatePaths(paths)
+	if err != nil {
+		return s.logError(err, "git.pull-multiple", "path validation failed")
+	}
+	results, err := PullMultiple(ctx, resolvedPaths, resolvedNames(paths, resolvedPaths, names))
+	if err != nil {
+		_ = s.logError(err, "git.pull-multiple", "pull multiple had failures")
+	}
+	return core.Result{Value: results, OK: err == nil}
+}
+
+func multipleActionPayload(opts core.Options, op string) ([]string, map[string]string, error) {
+	r := opts.Get("paths")
+	paths, ok := r.Value.([]string)
+	if !r.OK || !ok {
+		return nil, nil, gitServiceError(op, "paths must be []string", nil)
 	}
 
+	r = opts.Get("names")
+	if !r.OK || r.Value == nil {
+		return paths, nil, nil
+	}
+	names, ok := r.Value.(map[string]string)
+	if !ok {
+		return nil, nil, gitServiceError(op, "names must be map[string]string", nil)
+	}
+	return paths, names, nil
+}
+
+func (s *Service) validatePath(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", gitValidationError("path must be absolute: "+path, path, s.opts.WorkDir, nil)
+	}
+
+	path = filepath.Clean(path)
 	workDir := s.opts.WorkDir
-	if workDir != "" {
-		rel, err := filepath.Rel(workDir, path)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return core.E("git.validatePath", "path "+path+" is outside of allowed WorkDir "+workDir, nil)
+	if workDir == "" {
+		return path, nil
+	}
+
+	workDir = filepath.Clean(workDir)
+	if !filepath.IsAbs(workDir) {
+		return "", gitValidationError("WorkDir must be absolute: "+s.opts.WorkDir, path, s.opts.WorkDir, nil)
+	}
+
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		msg := "failed to resolve WorkDir: " + workDir
+		return "", gitValidationError(msg, path, workDir, err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		msg := "failed to resolve path: " + path
+		return "", gitValidationError(msg, path, workDir, err)
+	}
+
+	resolvedWorkDir = filepath.Clean(resolvedWorkDir)
+	resolvedPath = filepath.Clean(resolvedPath)
+	if !pathWithinWorkDir(resolvedPath, resolvedWorkDir) {
+		msg := "path " + resolvedPath + " is outside of allowed WorkDir " + resolvedWorkDir
+		return "", gitValidationError(msg, path, workDir, nil)
+	}
+	return resolvedPath, nil
+}
+
+func pathWithinWorkDir(path, workDir string) bool {
+	rel, err := filepath.Rel(workDir, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func (s *Service) validatePaths(paths []string) ([]string, error) {
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		validPath, err := s.validatePath(path)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, validPath)
+	}
+	return resolved, nil
+}
+
+func resolvedNames(paths, resolvedPaths []string, names map[string]string) map[string]string {
+	if names == nil {
+		return nil
+	}
+
+	resolved := make(map[string]string, len(names)+len(resolvedPaths))
+	for path, name := range names {
+		resolved[path] = name
+	}
+	for i, path := range paths {
+		if i >= len(resolvedPaths) {
+			break
+		}
+		name := names[path]
+		if name != "" {
+			resolved[resolvedPaths[i]] = name
 		}
 	}
-	return nil
+	return resolved
+}
+
+func (s *Service) logError(err error, op, msg string) core.Result {
+	if s.ServiceRuntime == nil || s.Core() == nil {
+		return core.Result{Value: err, OK: false}
+	}
+	return s.Core().LogError(err, op, msg)
+}
+
+func gitValidationError(msg, path, workDir string, err error) *GitError {
+	args := []string{"git.validatePath", "path=" + path}
+	if workDir != "" {
+		args = append(args, "workDir="+workDir)
+	}
+	return gitServiceErrorWithArgs(args, msg, err)
+}
+
+func gitServiceError(op, msg string, err error) *GitError {
+	return gitServiceErrorWithArgs([]string{op}, msg, err)
+}
+
+func gitServiceErrorWithArgs(args []string, msg string, err error) *GitError {
+	if err == nil {
+		err = fmt.Errorf("%s", msg)
+	} else {
+		err = fmt.Errorf("%s: %w", msg, err)
+	}
+	return &GitError{
+		Args:   args,
+		Err:    err,
+		Stderr: msg,
+	}
 }
 
 // Status returns last status result.
 func (s *Service) Status() []RepoStatus {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	statusLock := s.statusLock(nil)
+	if statusLock != nil {
+		statusLock.Mutex.RLock()
+		defer statusLock.Mutex.RUnlock()
+	}
 	return slices.Clone(s.lastStatus)
 }
 
 // All returns an iterator over all last known statuses.
 func (s *Service) All() iter.Seq[RepoStatus] {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	statusLock := s.statusLock(nil)
+	if statusLock != nil {
+		statusLock.Mutex.RLock()
+		defer statusLock.Mutex.RUnlock()
+	}
 	return slices.Values(slices.Clone(s.lastStatus))
+}
+
+// filteredIter returns an iterator over status entries that satisfy pred.
+func (s *Service) filteredIter(pred func(RepoStatus) bool) iter.Seq[RepoStatus] {
+	statusLock := s.statusLock(nil)
+	if statusLock != nil {
+		statusLock.Mutex.RLock()
+		defer statusLock.Mutex.RUnlock()
+	}
+	snapshot := slices.Clone(s.lastStatus)
+
+	return func(yield func(RepoStatus) bool) {
+		for _, st := range snapshot {
+			if st.Error == nil && pred(st) {
+				if !yield(st) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Service) statusLock(c *core.Core) *core.Lock {
+	if c != nil {
+		return c.Lock(statusLockName)
+	}
+	if s.ServiceRuntime == nil || s.Core() == nil {
+		return nil
+	}
+	return s.Core().Lock(statusLockName)
 }
 
 // Dirty returns an iterator over repos with uncommitted changes.
 func (s *Service) Dirty() iter.Seq[RepoStatus] {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	lastStatus := slices.Clone(s.lastStatus)
-
-	return func(yield func(RepoStatus) bool) {
-		for _, st := range lastStatus {
-			if st.Error == nil && st.IsDirty() {
-				if !yield(st) {
-					return
-				}
-			}
-		}
-	}
+	return s.filteredIter(func(st RepoStatus) bool { return st.IsDirty() })
 }
 
 // Ahead returns an iterator over repos with unpushed commits.
 func (s *Service) Ahead() iter.Seq[RepoStatus] {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	lastStatus := slices.Clone(s.lastStatus)
+	return s.filteredIter(func(st RepoStatus) bool { return st.HasUnpushed() })
+}
 
-	return func(yield func(RepoStatus) bool) {
-		for _, st := range lastStatus {
-			if st.Error == nil && st.HasUnpushed() {
-				if !yield(st) {
-					return
-				}
-			}
-		}
-	}
+// Behind returns an iterator over repos with unpulled commits.
+func (s *Service) Behind() iter.Seq[RepoStatus] {
+	return s.filteredIter(func(st RepoStatus) bool { return st.HasUnpulled() })
 }
 
 // DirtyRepos returns repos with uncommitted changes.
@@ -216,4 +439,9 @@ func (s *Service) DirtyRepos() []RepoStatus {
 // AheadRepos returns repos with unpushed commits.
 func (s *Service) AheadRepos() []RepoStatus {
 	return slices.Collect(s.Ahead())
+}
+
+// BehindRepos returns repos with unpulled commits.
+func (s *Service) BehindRepos() []RepoStatus {
+	return slices.Collect(s.Behind())
 }

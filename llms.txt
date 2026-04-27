@@ -1,0 +1,38 @@
+# go-git
+
+Module: `dappco.re/go/git`
+Purpose: Multi-repository Git operations library with standalone helpers and Core service integration.
+
+## Entry Points
+
+- `git.go`: standalone Git helpers. Exports `Status`, `StatusIter`, `Push`, `Pull`, `PushMultiple`, `PushMultipleIter`, `PullMultiple`, `PullMultipleIter`, `RepoStatus`, `GitError`, and `IsNonFastForward`.
+- `service.go`: Core integration. Exports `NewService`, `Service`, `ServiceOptions`, `QueryStatus`, `QueryDirtyRepos`, `QueryAheadRepos`, `QueryBehindRepos`, `TaskPush`, `TaskPull`, `TaskPushMultiple`, and `TaskPullMultiple`.
+- `docs/architecture.md`: design and data-flow notes.
+- `docs/development.md`: test and contribution workflow.
+
+## Operational Rules
+
+- Paths must be absolute.
+- `ServiceOptions.WorkDir` is optional; when set, all paths must stay within that directory.
+- `Status` checks repositories in parallel.
+- `Push`, `Pull`, `PushMultiple`, and `PullMultiple` run interactively so SSH prompts can reach the terminal.
+- `PushMultiple` and `PullMultiple` are sequential by design.
+
+## Common Patterns
+
+- Use `Status(ctx, StatusOptions{Paths: ..., Names: ...})` for batch inspection.
+- Use `Service` queries to reuse cached status data with `DirtyRepos`, `AheadRepos`, and `BehindRepos`.
+- Use `GitError` to inspect failed command stderr and args.
+- Use `IsNonFastForward(err)` to detect pull-before-push rejections.
+
+## Testing
+
+```bash
+GOMODCACHE=/tmp/gomodcache GOPATH=/tmp/gopath go test ./...
+```
+
+## Conventions
+
+- Tests use real temporary git repositories.
+- Comments and docs use UK English.
+- Commits use conventional prefixes like `feat:`, `fix:`, `refactor:`, and `docs:`.

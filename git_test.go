@@ -4,164 +4,303 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
+	"os/exec" // Note: test-only intrinsic - drives git CLI fixtures for repository setup.
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func deleteTestPath(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func gitTestOutput(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}
+
+func runTestGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	out, err := gitTestOutput(dir, args...)
+	if err != nil {
+		t.Fatalf("failed to run git %v: %s: %v", args, string(out), err)
+	}
+}
+
+func configureTestGit(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test User"},
+	} {
+		runTestGit(t, dir, args...)
+	}
+}
+
+func commitTestFile(t *testing.T, dir, path, content, message string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(dir, path), content)
+	runTestGit(t, dir, "add", path)
+	runTestGit(t, dir, "commit", "-m", message)
+}
+
+func gitHashObject(t *testing.T, dir, content string) string {
+	t.Helper()
+	cmd := exec.Command("git", "hash-object", "-w", "--stdin")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(content)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to hash git object: %s: %v", string(out), err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func stageSymlink(t *testing.T, dir, path, target string) {
+	t.Helper()
+	blob := gitHashObject(t, dir, target)
+	runTestGit(t, dir, "update-index", "--cacheinfo", "120000", blob, path)
+}
+
+func checkoutSymlink(t *testing.T, dir, path, target string) {
+	t.Helper()
+	deleteTestPath(t, filepath.Join(dir, path))
+	stageSymlink(t, dir, path, target)
+	runTestGit(t, dir, "checkout-index", "-f", path)
+}
+
+func replaceWorkingTreeWithSymlink(t *testing.T, dir, path, target string) {
+	t.Helper()
+	checkoutSymlink(t, dir, path, target)
+	runTestGit(t, dir, "reset", "--mixed", "HEAD")
+}
+
 // initTestRepo creates a temporary git repository with an initial commit.
-// Returns the path to the repository.
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	cmds := [][]string{
-		{"git", "init"},
-		{"git", "config", "user.email", "test@example.com"},
-		{"git", "config", "user.name", "Test User"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "failed to run %v: %s", args, string(out))
-	}
-
-	// Create a file and commit it so HEAD exists.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0644))
-
-	cmds = [][]string{
-		{"git", "add", "README.md"},
-		{"git", "commit", "-m", "initial commit"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "failed to run %v: %s", args, string(out))
-	}
+	runTestGit(t, dir, "init")
+	configureTestGit(t, dir)
+	commitTestFile(t, dir, "README.md", "# Test\n", "initial commit")
 
 	return dir
 }
 
-// --- RepoStatus method tests ---
+func initBareRemote(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runTestGit(t, dir, "init", "--bare")
+	return dir
+}
 
-func TestRepoStatus_IsDirty(t *testing.T) {
+func cloneTestRepo(t *testing.T, remote string) string {
+	t.Helper()
+	dir := t.TempDir()
+	runTestGit(t, "", "clone", remote, dir)
+	configureTestGit(t, dir)
+	return dir
+}
+
+func initRemoteRepo(t *testing.T) (string, string) {
+	t.Helper()
+	remote := initBareRemote(t)
+	clone := cloneTestRepo(t, remote)
+	commitTestFile(t, clone, "file.txt", "v1", "initial")
+	runTestGit(t, clone, "push", "origin", "HEAD")
+	return remote, clone
+}
+
+func initPushableRepo(t *testing.T) string {
+	t.Helper()
+	_, clone := initRemoteRepo(t)
+	commitTestFile(t, clone, "file.txt", "v2", "local commit")
+	return clone
+}
+
+func initPullableRepo(t *testing.T) string {
+	t.Helper()
+	remote, upstream := initRemoteRepo(t)
+	clone := cloneTestRepo(t, remote)
+	commitTestFile(t, upstream, "file.txt", "v2", "remote commit")
+	runTestGit(t, upstream, "push", "origin", "HEAD")
+	return clone
+}
+
+func assertErrorContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected %v to contain %v", err.Error(), want)
+	}
+}
+
+func assertGitError(t *testing.T, err error, wantArg string) *GitError {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var gitErr *GitError
+	if !errors.As(err, &gitErr) {
+		t.Fatalf("expected *GitError, got %T", err)
+	}
+	if wantArg != "" && !slices.Contains(gitErr.Args, wantArg) {
+		t.Fatalf("expected args %v to contain %v", gitErr.Args, wantArg)
+	}
+	if strings.TrimSpace(gitErr.Stderr) == "" {
+		t.Fatalf("expected non-empty stderr for %v", gitErr.Args)
+	}
+	return gitErr
+}
+
+func localSymlinkTarget(t *testing.T) string {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), "symlink-target")
+	writeTestFile(t, target, "symlink target")
+
+	probe := filepath.Join(t.TempDir(), "symlink-probe")
+	if err := os.Symlink(target, probe); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	if err := os.Remove(probe); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return target
+}
+
+func TestGit_RepoStatusIsDirty_Good(t *testing.T) {
+	tests := []struct {
+		name   string
+		status RepoStatus
+	}{
+		{name: "modified files", status: RepoStatus{Modified: 3}},
+		{name: "untracked files", status: RepoStatus{Untracked: 1}},
+		{name: "staged files", status: RepoStatus{Staged: 2}},
+		{name: "all dirty counters", status: RepoStatus{Modified: 1, Untracked: 2, Staged: 3}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.status.IsDirty() {
+				t.Fatal("expected true")
+			}
+		})
+	}
+}
+
+func TestGit_RepoStatusIsDirty_Bad(t *testing.T) {
+	status := RepoStatus{Modified: -1, Untracked: -1, Staged: -1}
+	if status.IsDirty() {
+		t.Fatal("negative counters should not mark a repo dirty")
+	}
+}
+
+func TestGit_RepoStatusIsDirty_Ugly(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
 		expected bool
 	}{
-		{
-			name:     "clean repo",
-			status:   RepoStatus{},
-			expected: false,
-		},
-		{
-			name:     "modified files",
-			status:   RepoStatus{Modified: 3},
-			expected: true,
-		},
-		{
-			name:     "untracked files",
-			status:   RepoStatus{Untracked: 1},
-			expected: true,
-		},
-		{
-			name:     "staged files",
-			status:   RepoStatus{Staged: 2},
-			expected: true,
-		},
-		{
-			name:     "all types dirty",
-			status:   RepoStatus{Modified: 1, Untracked: 2, Staged: 3},
-			expected: true,
-		},
-		{
-			name:     "only ahead is not dirty",
-			status:   RepoStatus{Ahead: 5},
-			expected: false,
-		},
-		{
-			name:     "only behind is not dirty",
-			status:   RepoStatus{Behind: 2},
-			expected: false,
-		},
+		{name: "clean zero value", status: RepoStatus{}, expected: false},
+		{name: "ahead and behind only", status: RepoStatus{Ahead: 9, Behind: 7}, expected: false},
+		{name: "large dirty counters", status: RepoStatus{Modified: 1 << 30, Untracked: 1 << 30, Staged: 1 << 30}, expected: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.status.IsDirty())
+			if got := tt.status.IsDirty(); got != tt.expected {
+				t.Fatalf("want %v, got %v", tt.expected, got)
+			}
 		})
 	}
 }
 
-func TestRepoStatus_HasUnpushed(t *testing.T) {
+func TestGit_RepoStatusHasUnpushed_Good(t *testing.T) {
+	status := RepoStatus{Ahead: 3}
+	if !status.HasUnpushed() {
+		t.Fatal("expected true")
+	}
+}
+
+func TestGit_RepoStatusHasUnpushed_Bad(t *testing.T) {
+	status := RepoStatus{Ahead: -1}
+	if status.HasUnpushed() {
+		t.Fatal("negative ahead count should not mark a repo unpushed")
+	}
+}
+
+func TestGit_RepoStatusHasUnpushed_Ugly(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
 		expected bool
 	}{
-		{
-			name:     "no commits ahead",
-			status:   RepoStatus{Ahead: 0},
-			expected: false,
-		},
-		{
-			name:     "commits ahead",
-			status:   RepoStatus{Ahead: 3},
-			expected: true,
-		},
-		{
-			name:     "behind but not ahead",
-			status:   RepoStatus{Behind: 5},
-			expected: false,
-		},
+		{name: "zero count", status: RepoStatus{}, expected: false},
+		{name: "behind only", status: RepoStatus{Behind: 5}, expected: false},
+		{name: "large ahead count", status: RepoStatus{Ahead: 1 << 30}, expected: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.status.HasUnpushed())
+			if got := tt.status.HasUnpushed(); got != tt.expected {
+				t.Fatalf("want %v, got %v", tt.expected, got)
+			}
 		})
 	}
 }
 
-func TestRepoStatus_HasUnpulled(t *testing.T) {
+func TestGit_RepoStatusHasUnpulled_Good(t *testing.T) {
+	status := RepoStatus{Behind: 2}
+	if !status.HasUnpulled() {
+		t.Fatal("expected true")
+	}
+}
+
+func TestGit_RepoStatusHasUnpulled_Bad(t *testing.T) {
+	status := RepoStatus{Behind: -1}
+	if status.HasUnpulled() {
+		t.Fatal("negative behind count should not mark a repo unpulled")
+	}
+}
+
+func TestGit_RepoStatusHasUnpulled_Ugly(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
 		expected bool
 	}{
-		{
-			name:     "no commits behind",
-			status:   RepoStatus{Behind: 0},
-			expected: false,
-		},
-		{
-			name:     "commits behind",
-			status:   RepoStatus{Behind: 2},
-			expected: true,
-		},
-		{
-			name:     "ahead but not behind",
-			status:   RepoStatus{Ahead: 3},
-			expected: false,
-		},
+		{name: "zero count", status: RepoStatus{}, expected: false},
+		{name: "ahead only", status: RepoStatus{Ahead: 3}, expected: false},
+		{name: "large behind count", status: RepoStatus{Behind: 1 << 30}, expected: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.status.HasUnpulled())
+			if got := tt.status.HasUnpulled(); got != tt.expected {
+				t.Fatalf("want %v, got %v", tt.expected, got)
+			}
 		})
 	}
 }
 
-// --- GitError tests ---
-
-func TestGitError_Error(t *testing.T) {
+func TestGit_GitErrorError_Good(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      *GitError
@@ -181,212 +320,598 @@ func TestGitError_Error(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.err.Error())
+			if got := tt.err.Error(); tt.expected != got {
+				t.Fatalf("want %v, got %v", tt.expected, got)
+			}
 		})
 	}
 }
 
-func TestGitError_Unwrap(t *testing.T) {
+func TestGit_GitErrorError_Bad(t *testing.T) {
+	err := &GitError{Args: []string{"status"}}
+	expected := "git command \"git status\" failed"
+	if got := err.Error(); got != expected {
+		t.Fatalf("want %v, got %v", expected, got)
+	}
+}
+
+func TestGit_GitErrorError_Ugly(t *testing.T) {
+	err := &GitError{
+		Args:   []string{"status", "--short"},
+		Err:    errors.New("fallback"),
+		Stderr: "\n\tfatal: spaced stderr\n\n",
+	}
+	expected := "git command \"git status --short\" failed: fatal: spaced stderr"
+	if got := err.Error(); got != expected {
+		t.Fatalf("want %v, got %v", expected, got)
+	}
+}
+
+func TestGit_GitErrorUnwrap_Good(t *testing.T) {
 	inner := errors.New("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
-	assert.Equal(t, inner, gitErr.Unwrap())
-	assert.True(t, errors.Is(gitErr, inner))
-}
-
-// --- IsNonFastForward tests ---
-
-func TestIsNonFastForward(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-		{
-			name:     "non-fast-forward message",
-			err:      errors.New("! [rejected] main -> main (non-fast-forward)"),
-			expected: true,
-		},
-		{
-			name:     "fetch first message",
-			err:      errors.New("Updates were rejected because the remote contains work that you do not have locally. fetch first"),
-			expected: true,
-		},
-		{
-			name:     "tip behind message",
-			err:      errors.New("Updates were rejected because the tip of your current branch is behind"),
-			expected: true,
-		},
-		{
-			name:     "unrelated error",
-			err:      errors.New("connection refused"),
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, IsNonFastForward(tt.err))
-		})
+	if got := gitErr.Unwrap(); inner != got {
+		t.Fatalf("want %v, got %v", inner, got)
 	}
 }
 
-// --- gitCommand tests with real git repos ---
-
-func TestGitCommand_Good(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	out, err := gitCommand(context.Background(), dir, "rev-parse", "--abbrev-ref", "HEAD")
-	require.NoError(t, err)
-	// Default branch could be main or master depending on git config.
-	branch := out
-	assert.NotEmpty(t, branch)
-}
-
-func TestGitCommand_Bad_InvalidDir(t *testing.T) {
-	_, err := gitCommand(context.Background(), "/nonexistent/path", "status")
-	require.Error(t, err)
-}
-
-func TestGitCommand_Bad_NotARepo(t *testing.T) {
-	dir, _ := filepath.Abs(t.TempDir())
-	_, err := gitCommand(context.Background(), dir, "status")
-	require.Error(t, err)
-
-	// Should be a GitError with stderr.
-	var gitErr *GitError
-	if errors.As(err, &gitErr) {
-		assert.Contains(t, gitErr.Stderr, "not a git repository")
-		assert.Equal(t, []string{"status"}, gitErr.Args)
+func TestGit_GitErrorUnwrap_Bad(t *testing.T) {
+	gitErr := &GitError{}
+	if got := gitErr.Unwrap(); got != nil {
+		t.Fatalf("expected nil, got %v", got)
 	}
 }
 
-// --- getStatus integration tests ---
-
-func TestGetStatus_Good_CleanRepo(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	status := getStatus(context.Background(), dir, "test-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, "test-repo", status.Name)
-	assert.Equal(t, dir, status.Path)
-	assert.NotEmpty(t, status.Branch)
-	assert.False(t, status.IsDirty())
+func TestGit_GitErrorUnwrap_Ugly(t *testing.T) {
+	inner := errors.New("underlying error")
+	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
+	if !errors.Is(gitErr, inner) {
+		t.Fatal("expected wrapped error to match")
+	}
 }
 
-func TestGetStatus_Good_ModifiedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+func TestGit_IsNonFastForward_Good(t *testing.T) {
+	tests := []error{
+		errors.New("! [rejected] main -> main (non-fast-forward)"),
+		errors.New("Updates were rejected because the remote contains work that you do not have locally. fetch first"),
+		errors.New("Updates were rejected because the tip of your current branch is behind"),
+	}
 
-	// Modify the existing tracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified\n"), 0644))
-
-	status := getStatus(context.Background(), dir, "modified-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, 1, status.Modified)
-	assert.True(t, status.IsDirty())
+	for _, err := range tests {
+		if !IsNonFastForward(err) {
+			t.Fatalf("expected true for %v", err)
+		}
+	}
 }
 
-func TestGetStatus_Good_UntrackedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+func TestGit_IsNonFastForward_Bad(t *testing.T) {
+	tests := []error{
+		nil,
+		errors.New("connection refused"),
+		errors.New("authentication failed"),
+	}
 
-	// Create a new untracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("hello"), 0644))
-
-	status := getStatus(context.Background(), dir, "untracked-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, 1, status.Untracked)
-	assert.True(t, status.IsDirty())
+	for _, err := range tests {
+		if IsNonFastForward(err) {
+			t.Fatalf("expected false for %v", err)
+		}
+	}
 }
 
-func TestGetStatus_Good_StagedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	// Create and stage a new file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0644))
-	cmd := exec.Command("git", "add", "staged.txt")
-	cmd.Dir = dir
-	require.NoError(t, cmd.Run())
-
-	status := getStatus(context.Background(), dir, "staged-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, 1, status.Staged)
-	assert.True(t, status.IsDirty())
+func TestGit_IsNonFastForward_Ugly(t *testing.T) {
+	err := &GitError{
+		Args:   []string{"push"},
+		Err:    errors.New("exit status 1"),
+		Stderr: "UPDATES WERE REJECTED BECAUSE THE REMOTE CONTAINS WORK THAT YOU DO NOT HAVE LOCALLY. FETCH FIRST",
+	}
+	if !IsNonFastForward(err) {
+		t.Fatal("expected mixed-case wrapped git error to match")
+	}
 }
 
-func TestGetStatus_Good_MixedChanges(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	// Create untracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new"), 0644))
-
-	// Modify tracked file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Changed\n"), 0644))
-
-	// Create and stage another file.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0644))
-	cmd := exec.Command("git", "add", "staged.txt")
-	cmd.Dir = dir
-	require.NoError(t, cmd.Run())
-
-	status := getStatus(context.Background(), dir, "mixed-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, 1, status.Modified, "expected 1 modified file")
-	assert.Equal(t, 1, status.Untracked, "expected 1 untracked file")
-	assert.Equal(t, 1, status.Staged, "expected 1 staged file")
-	assert.True(t, status.IsDirty())
+func TestGit_IsStagedStatus_Good(t *testing.T) {
+	for _, ch := range []byte{'A', 'C', 'D', 'R', 'M', 'T', 'U'} {
+		if !isStagedStatus(ch) {
+			t.Fatalf("expected %q to be staged", ch)
+		}
+	}
 }
 
-func TestGetStatus_Good_DeletedTrackedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	// Delete the tracked file (unstaged deletion).
-	require.NoError(t, os.Remove(filepath.Join(dir, "README.md")))
-
-	status := getStatus(context.Background(), dir, "deleted-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, 1, status.Modified, "deletion in working tree counts as modified")
-	assert.True(t, status.IsDirty())
+func TestGit_IsStagedStatus_Bad(t *testing.T) {
+	for _, ch := range []byte{' ', '?', 'm', 'x'} {
+		if isStagedStatus(ch) {
+			t.Fatalf("expected %q not to be staged", ch)
+		}
+	}
 }
 
-func TestGetStatus_Good_StagedDeletion(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	// Stage a deletion.
-	cmd := exec.Command("git", "rm", "README.md")
-	cmd.Dir = dir
-	require.NoError(t, cmd.Run())
-
-	status := getStatus(context.Background(), dir, "staged-delete-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, 1, status.Staged, "staged deletion counts as staged")
-	assert.True(t, status.IsDirty())
+func TestGit_IsStagedStatus_Ugly(t *testing.T) {
+	for _, ch := range []byte{0, '\n', 255} {
+		if isStagedStatus(ch) {
+			t.Fatalf("expected boundary byte %d not to be staged", ch)
+		}
+	}
 }
 
-func TestGetStatus_Bad_InvalidPath(t *testing.T) {
-	status := getStatus(context.Background(), "/nonexistent/path", "bad-repo")
-	assert.Error(t, status.Error)
-	assert.Equal(t, "bad-repo", status.Name)
+func TestGit_IsModifiedStatus_Good(t *testing.T) {
+	for _, ch := range []byte{'M', 'D', 'T', 'U'} {
+		if !isModifiedStatus(ch) {
+			t.Fatalf("expected %q to be modified", ch)
+		}
+	}
 }
 
-func TestGetStatus_Bad_RelativePath(t *testing.T) {
-	status := getStatus(context.Background(), "relative/path", "rel-repo")
-	assert.Error(t, status.Error)
-	assert.Contains(t, status.Error.Error(), "path must be absolute")
-	assert.Equal(t, "rel-repo", status.Name)
+func TestGit_IsModifiedStatus_Bad(t *testing.T) {
+	for _, ch := range []byte{' ', '?', 'A', 'm'} {
+		if isModifiedStatus(ch) {
+			t.Fatalf("expected %q not to be modified", ch)
+		}
+	}
 }
 
-// --- Status (parallel multi-repo) tests ---
+func TestGit_IsModifiedStatus_Ugly(t *testing.T) {
+	for _, ch := range []byte{0, '\n', 255} {
+		if isModifiedStatus(ch) {
+			t.Fatalf("expected boundary byte %d not to be modified", ch)
+		}
+	}
+}
 
-func TestStatus_Good_MultipleRepos(t *testing.T) {
-	dir1, _ := filepath.Abs(initTestRepo(t))
-	dir2, _ := filepath.Abs(initTestRepo(t))
+func TestGit_IsNoUpstreamError_Good(t *testing.T) {
+	err := errors.New("fatal: no upstream configured for branch")
+	if !isNoUpstreamError(err) {
+		t.Fatal("expected true")
+	}
+}
 
-	// Make dir2 dirty.
-	require.NoError(t, os.WriteFile(filepath.Join(dir2, "extra.txt"), []byte("extra"), 0644))
+func TestGit_IsNoUpstreamError_Bad(t *testing.T) {
+	tests := []error{
+		nil,
+		errors.New("fatal: not a git repository"),
+	}
+
+	for _, err := range tests {
+		if isNoUpstreamError(err) {
+			t.Fatalf("expected false for %v", err)
+		}
+	}
+}
+
+func TestGit_IsNoUpstreamError_Ugly(t *testing.T) {
+	err := errors.New("\nNO UPSTREAM branch configured\n")
+	if !isNoUpstreamError(err) {
+		t.Fatal("expected trimmed mixed-case message to match")
+	}
+}
+
+func TestGit_RequireAbsolutePath_Good(t *testing.T) {
+	if err := requireAbsolutePath("git.test", t.TempDir()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGit_RequireAbsolutePath_Bad(t *testing.T) {
+	err := requireAbsolutePath("git.test", "relative/path")
+	assertErrorContains(t, err, "path must be absolute")
+}
+
+func TestGit_RequireAbsolutePath_Ugly(t *testing.T) {
+	err := requireAbsolutePath("git.test", "")
+	assertErrorContains(t, err, "path must be absolute")
+}
+
+func TestGit_ParseGitCount_Good(t *testing.T) {
+	got, err := parseGitCount("ahead", "12\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 12 {
+		t.Fatalf("want %v, got %v", 12, got)
+	}
+}
+
+func TestGit_ParseGitCount_Bad(t *testing.T) {
+	_, err := parseGitCount("ahead", "not-a-number")
+	assertErrorContains(t, err, "failed to parse ahead count")
+}
+
+func TestGit_ParseGitCount_Ugly(t *testing.T) {
+	got, err := parseGitCount("behind", "\t0\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("want %v, got %v", 0, got)
+	}
+}
+
+func TestGit_GitCommand_Good(t *testing.T) {
+	dir := initTestRepo(t)
+
+	out, err := gitCommand(context.Background(), dir, "rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if trim(out) != "true" {
+		t.Fatalf("want %v, got %v", "true", trim(out))
+	}
+}
+
+func TestGit_GitCommand_Bad(t *testing.T) {
+	t.Run("invalid dir", func(t *testing.T) {
+		_, err := gitCommand(context.Background(), filepath.Join(t.TempDir(), "missing"), "status")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("not a repo", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := gitCommand(context.Background(), dir, "status")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		var gitErr *GitError
+		if !errors.As(err, &gitErr) {
+			t.Fatalf("expected GitError, got %T", err)
+		}
+		if !strings.Contains(gitErr.Stderr, "not a git repository") {
+			t.Fatalf("expected %v to contain %v", gitErr.Stderr, "not a git repository")
+		}
+		if !slices.Equal([]string{"status"}, gitErr.Args) {
+			t.Fatalf("want %v, got %v", []string{"status"}, gitErr.Args)
+		}
+	})
+
+	t.Run("relative path", func(t *testing.T) {
+		_, err := gitCommand(context.Background(), "relative/path", "status")
+		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
+	})
+}
+
+func TestGit_GitCommand_Ugly(t *testing.T) {
+	dir := initTestRepo(t)
+
+	out, err := gitCommand(nil, dir, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "" {
+		t.Fatalf("want empty porcelain output, got %q", out)
+	}
+}
+
+func TestGit_Push_Good(t *testing.T) {
+	dir := initPushableRepo(t)
+
+	if err := Push(context.Background(), dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ahead, behind, err := getAheadBehind(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ahead != 0 || behind != 0 {
+		t.Fatalf("want ahead/behind 0/0, got %d/%d", ahead, behind)
+	}
+}
+
+func TestGit_Push_Bad(t *testing.T) {
+	t.Run("relative path", func(t *testing.T) {
+		err := Push(context.Background(), "relative/path")
+		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
+	})
+
+	t.Run("no remote", func(t *testing.T) {
+		dir := initTestRepo(t)
+		err := Push(context.Background(), dir)
+		if err == nil {
+			t.Fatal("push without remote should fail: expected error, got nil")
+		}
+	})
+}
+
+func TestGit_Push_Ugly(t *testing.T) {
+	dir := initPushableRepo(t)
+
+	if err := Push(nil, dir); err != nil {
+		t.Fatalf("unexpected error with nil context: %v", err)
+	}
+}
+
+func TestGit_Pull_Good(t *testing.T) {
+	dir := initPullableRepo(t)
+
+	if err := Pull(context.Background(), dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ahead, behind, err := getAheadBehind(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ahead != 0 || behind != 0 {
+		t.Fatalf("want ahead/behind 0/0, got %d/%d", ahead, behind)
+	}
+}
+
+func TestGit_Pull_Bad(t *testing.T) {
+	t.Run("relative path", func(t *testing.T) {
+		err := Pull(context.Background(), "relative/path")
+		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
+	})
+
+	t.Run("no remote", func(t *testing.T) {
+		dir := initTestRepo(t)
+		err := Pull(context.Background(), dir)
+		if err == nil {
+			t.Fatal("pull without remote should fail: expected error, got nil")
+		}
+	})
+}
+
+func TestGit_Pull_Ugly(t *testing.T) {
+	dir := initPullableRepo(t)
+
+	if err := Pull(nil, dir); err != nil {
+		t.Fatalf("unexpected error with nil context: %v", err)
+	}
+}
+
+func TestGit_GetStatus_Good(t *testing.T) {
+	t.Run("clean repo", func(t *testing.T) {
+		dir := initTestRepo(t)
+
+		status := getStatus(context.Background(), dir, "test-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if "test-repo" != status.Name {
+			t.Fatalf("want %v, got %v", "test-repo", status.Name)
+		}
+		if dir != status.Path {
+			t.Fatalf("want %v, got %v", dir, status.Path)
+		}
+		if status.Branch == "" {
+			t.Fatal("expected non-empty")
+		}
+		if status.IsDirty() {
+			t.Fatal("expected false")
+		}
+	})
+
+	t.Run("modified file", func(t *testing.T) {
+		dir := initTestRepo(t)
+		writeTestFile(t, filepath.Join(dir, "README.md"), "# Modified\n")
+
+		status := getStatus(context.Background(), dir, "modified-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Modified {
+			t.Fatalf("want %v, got %v", 1, status.Modified)
+		}
+		if !status.IsDirty() {
+			t.Fatal("expected true")
+		}
+	})
+
+	t.Run("untracked file", func(t *testing.T) {
+		dir := initTestRepo(t)
+		writeTestFile(t, filepath.Join(dir, "newfile.txt"), "hello")
+
+		status := getStatus(context.Background(), dir, "untracked-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Untracked {
+			t.Fatalf("want %v, got %v", 1, status.Untracked)
+		}
+		if !status.IsDirty() {
+			t.Fatal("expected true")
+		}
+	})
+
+	t.Run("staged file", func(t *testing.T) {
+		dir := initTestRepo(t)
+		writeTestFile(t, filepath.Join(dir, "staged.txt"), "staged")
+		runTestGit(t, dir, "add", "staged.txt")
+
+		status := getStatus(context.Background(), dir, "staged-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Staged {
+			t.Fatalf("want %v, got %v", 1, status.Staged)
+		}
+		if !status.IsDirty() {
+			t.Fatal("expected true")
+		}
+	})
+
+	t.Run("mixed changes", func(t *testing.T) {
+		dir := initTestRepo(t)
+		writeTestFile(t, filepath.Join(dir, "untracked.txt"), "new")
+		writeTestFile(t, filepath.Join(dir, "README.md"), "# Changed\n")
+		writeTestFile(t, filepath.Join(dir, "staged.txt"), "staged")
+		runTestGit(t, dir, "add", "staged.txt")
+
+		status := getStatus(context.Background(), dir, "mixed-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Modified {
+			t.Fatalf("expected 1 modified file: want %v, got %v", 1, status.Modified)
+		}
+		if 1 != status.Untracked {
+			t.Fatalf("expected 1 untracked file: want %v, got %v", 1, status.Untracked)
+		}
+		if 1 != status.Staged {
+			t.Fatalf("expected 1 staged file: want %v, got %v", 1, status.Staged)
+		}
+	})
+
+	t.Run("deleted tracked file", func(t *testing.T) {
+		dir := initTestRepo(t)
+		deleteTestPath(t, filepath.Join(dir, "README.md"))
+
+		status := getStatus(context.Background(), dir, "deleted-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Modified {
+			t.Fatalf("deletion in working tree counts as modified: want %v, got %v", 1, status.Modified)
+		}
+	})
+
+	t.Run("staged deletion", func(t *testing.T) {
+		dir := initTestRepo(t)
+		runTestGit(t, dir, "rm", "README.md")
+
+		status := getStatus(context.Background(), dir, "staged-delete-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Staged {
+			t.Fatalf("staged deletion counts as staged: want %v, got %v", 1, status.Staged)
+		}
+	})
+}
+
+func TestGit_GetStatus_Bad(t *testing.T) {
+	t.Run("invalid path", func(t *testing.T) {
+		status := getStatus(context.Background(), filepath.Join(t.TempDir(), "missing"), "bad-repo")
+		if status.Error == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if "bad-repo" != status.Name {
+			t.Fatalf("want %v, got %v", "bad-repo", status.Name)
+		}
+	})
+
+	t.Run("relative path", func(t *testing.T) {
+		status := getStatus(context.Background(), "relative/path", "rel-repo")
+		if status.Error == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(status.Error.Error(), "path must be absolute") {
+			t.Fatalf("expected %v to contain %v", status.Error.Error(), "path must be absolute")
+		}
+		if "rel-repo" != status.Name {
+			t.Fatalf("want %v, got %v", "rel-repo", status.Name)
+		}
+	})
+
+	t.Run("not a repo", func(t *testing.T) {
+		dir := t.TempDir()
+		status := getStatus(context.Background(), dir, "not-a-repo")
+		if status.Error == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestGit_GetStatus_Ugly(t *testing.T) {
+	t.Run("merge conflict", func(t *testing.T) {
+		dir := initTestRepo(t)
+
+		runTestGit(t, dir, "checkout", "-b", "feature")
+		commitTestFile(t, dir, "README.md", "# Feature\n", "feature change")
+		runTestGit(t, dir, "checkout", "-")
+		commitTestFile(t, dir, "README.md", "# Main\n", "main change")
+
+		out, err := gitTestOutput(dir, "merge", "feature")
+		if err == nil {
+			t.Fatal("expected the merge to conflict: expected error, got nil")
+		}
+		if !strings.Contains(string(out), "CONFLICT") {
+			t.Fatalf("expected %v to contain %v", string(out), "CONFLICT")
+		}
+
+		status := getStatus(context.Background(), dir, "conflicted-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Staged {
+			t.Fatalf("unmerged paths count as staged: want %v, got %v", 1, status.Staged)
+		}
+		if 1 != status.Modified {
+			t.Fatalf("unmerged paths count as modified: want %v, got %v", 1, status.Modified)
+		}
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		dir := initTestRepo(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		status := getStatus(ctx, dir, "cancelled-repo")
+		if status.Error == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("renamed file", func(t *testing.T) {
+		dir := initTestRepo(t)
+		runTestGit(t, dir, "mv", "README.md", "GUIDE.md")
+
+		status := getStatus(context.Background(), dir, "renamed-repo")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Staged {
+			t.Fatalf("rename should count as staged: want %v, got %v", 1, status.Staged)
+		}
+	})
+
+	t.Run("type changed file in working tree", func(t *testing.T) {
+		dir := initTestRepo(t)
+		replaceWorkingTreeWithSymlink(t, dir, "README.md", localSymlinkTarget(t))
+
+		status := getStatus(context.Background(), dir, "typechanged-working-tree")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Modified {
+			t.Fatalf("type change in working tree counts as modified: want %v, got %v", 1, status.Modified)
+		}
+	})
+
+	t.Run("type changed file staged", func(t *testing.T) {
+		dir := initTestRepo(t)
+		checkoutSymlink(t, dir, "README.md", localSymlinkTarget(t))
+
+		status := getStatus(context.Background(), dir, "typechanged-staged")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if 1 != status.Staged {
+			t.Fatalf("type change in the index counts as staged: want %v, got %v", 1, status.Staged)
+		}
+	})
+
+	t.Run("ahead behind without upstream", func(t *testing.T) {
+		dir := initTestRepo(t)
+
+		status := getStatus(context.Background(), dir, "no-upstream")
+		if status.Error != nil {
+			t.Fatalf("unexpected error: %v", status.Error)
+		}
+		if status.Ahead != 0 || status.Behind != 0 {
+			t.Fatalf("want ahead/behind 0/0, got %d/%d", status.Ahead, status.Behind)
+		}
+	})
+}
+
+func TestGit_Status_Good(t *testing.T) {
+	dir1 := initTestRepo(t)
+	dir2 := initTestRepo(t)
+	writeTestFile(t, filepath.Join(dir2, "extra.txt"), "extra")
 
 	results := Status(context.Background(), StatusOptions{
 		Paths: []string{dir1, dir2},
@@ -396,180 +921,496 @@ func TestStatus_Good_MultipleRepos(t *testing.T) {
 		},
 	})
 
-	require.Len(t, results, 2)
-
-	assert.Equal(t, "clean-repo", results[0].Name)
-	assert.NoError(t, results[0].Error)
-	assert.False(t, results[0].IsDirty())
-
-	assert.Equal(t, "dirty-repo", results[1].Name)
-	assert.NoError(t, results[1].Error)
-	assert.True(t, results[1].IsDirty())
+	if len(results) != 2 {
+		t.Fatalf("want %v, got %v", 2, len(results))
+	}
+	if "clean-repo" != results[0].Name {
+		t.Fatalf("want %v, got %v", "clean-repo", results[0].Name)
+	}
+	if results[0].Error != nil {
+		t.Fatalf("unexpected error: %v", results[0].Error)
+	}
+	if results[0].IsDirty() {
+		t.Fatal("expected false")
+	}
+	if "dirty-repo" != results[1].Name {
+		t.Fatalf("want %v, got %v", "dirty-repo", results[1].Name)
+	}
+	if results[1].Error != nil {
+		t.Fatalf("unexpected error: %v", results[1].Error)
+	}
+	if !results[1].IsDirty() {
+		t.Fatal("expected true")
+	}
 }
 
-func TestStatus_Good_EmptyPaths(t *testing.T) {
-	results := Status(context.Background(), StatusOptions{
-		Paths: []string{},
-	})
-	assert.Empty(t, results)
-}
-
-func TestStatus_Good_NameFallback(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	// No name mapping — path should be used as name.
-	results := Status(context.Background(), StatusOptions{
-		Paths: []string{dir},
-		Names: map[string]string{},
-	})
-
-	require.Len(t, results, 1)
-	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
-}
-
-func TestStatus_Good_WithErrors(t *testing.T) {
-	validDir, _ := filepath.Abs(initTestRepo(t))
-	invalidDir, _ := filepath.Abs("/nonexistent/path")
+func TestGit_Status_Bad(t *testing.T) {
+	validDir := initTestRepo(t)
+	invalidDir := filepath.Join(t.TempDir(), "missing")
 
 	results := Status(context.Background(), StatusOptions{
-		Paths: []string{validDir, invalidDir},
+		Paths: []string{validDir, invalidDir, "relative/path"},
 		Names: map[string]string{
 			validDir:   "good",
-			invalidDir: "bad",
+			invalidDir: "missing",
 		},
 	})
 
-	require.Len(t, results, 2)
-	assert.NoError(t, results[0].Error)
-	assert.Error(t, results[1].Error)
+	if len(results) != 3 {
+		t.Fatalf("want %v, got %v", 3, len(results))
+	}
+	if results[0].Error != nil {
+		t.Fatalf("unexpected error: %v", results[0].Error)
+	}
+	if results[1].Error == nil {
+		t.Fatal("expected error for missing path")
+	}
+	if results[2].Error == nil {
+		t.Fatal("expected error for relative path")
+	}
+	assertGitError(t, results[2].Error, "relative/path")
 }
 
-// --- PushMultiple tests ---
-
-func TestPushMultiple_Good_NoRemote(t *testing.T) {
-	// Push without a remote will fail but we can test the result structure.
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{
-		dir: "test-repo",
+func TestGit_Status_Ugly(t *testing.T) {
+	t.Run("empty paths", func(t *testing.T) {
+		results := Status(context.Background(), StatusOptions{Paths: []string{}})
+		if len(results) != 0 {
+			t.Fatalf("want %v, got %v", 0, len(results))
+		}
 	})
-	assert.Error(t, err)
 
-	require.Len(t, results, 1)
-	assert.Equal(t, "test-repo", results[0].Name)
-	assert.Equal(t, dir, results[0].Path)
-	// Push without remote should fail.
-	assert.False(t, results[0].Success)
-	assert.Error(t, results[0].Error)
+	t.Run("name fallback", func(t *testing.T) {
+		dir := initTestRepo(t)
+
+		results := Status(context.Background(), StatusOptions{
+			Paths: []string{dir},
+			Names: map[string]string{},
+		})
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		if dir != results[0].Name {
+			t.Fatalf("name should fall back to path: want %v, got %v", dir, results[0].Name)
+		}
+	})
+
+	t.Run("nil context", func(t *testing.T) {
+		dir := initTestRepo(t)
+
+		results := Status(nil, StatusOptions{Paths: []string{dir}})
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		if results[0].Error != nil {
+			t.Fatalf("unexpected error: %v", results[0].Error)
+		}
+	})
 }
 
-func TestPushMultiple_Good_NameFallback(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+func TestGit_StatusIter_Good(t *testing.T) {
+	dir1 := initTestRepo(t)
+	dir2 := initTestRepo(t)
+	writeTestFile(t, filepath.Join(dir2, "extra.txt"), "extra")
 
-	results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{})
-	assert.Error(t, err)
+	statuses := slices.Collect(StatusIter(context.Background(), StatusOptions{
+		Paths: []string{dir1, dir2},
+		Names: map[string]string{
+			dir1: "clean-repo",
+			dir2: "dirty-repo",
+		},
+	}))
 
-	require.Len(t, results, 1)
-	assert.Equal(t, dir, results[0].Name, "name should fall back to path")
-}
-
-// --- Pull tests ---
-
-func TestPull_Bad_NoRemote(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-	err := Pull(context.Background(), dir)
-	assert.Error(t, err, "pull without remote should fail")
-}
-
-// --- Push tests ---
-
-func TestPush_Bad_NoRemote(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-	err := Push(context.Background(), dir)
-	assert.Error(t, err, "push without remote should fail")
-}
-
-// --- Context cancellation test ---
-
-func TestGetStatus_Good_ContextCancellation(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately.
-
-	status := getStatus(ctx, dir, "cancelled-repo")
-	// With a cancelled context, the git commands should fail.
-	assert.Error(t, status.Error)
-}
-
-// --- getAheadBehind with a tracking branch ---
-
-func TestGetAheadBehind_Good_WithUpstream(t *testing.T) {
-	// Create a bare remote and a clone to test ahead/behind counts.
-	bareDir, _ := filepath.Abs(t.TempDir())
-	cloneDir, _ := filepath.Abs(t.TempDir())
-
-	// Initialise the bare repo.
-	cmd := exec.Command("git", "init", "--bare")
-	cmd.Dir = bareDir
-	require.NoError(t, cmd.Run())
-
-	// Clone it.
-	cmd = exec.Command("git", "clone", bareDir, cloneDir)
-	require.NoError(t, cmd.Run())
-
-	// Configure user in clone.
-	for _, args := range [][]string{
-		{"git", "config", "user.email", "test@example.com"},
-		{"git", "config", "user.name", "Test User"},
-	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		require.NoError(t, cmd.Run())
+	if len(statuses) != 2 {
+		t.Fatalf("want %v, got %v", 2, len(statuses))
 	}
-
-	// Create initial commit and push.
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v1"), 0644))
-	for _, args := range [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", "initial"},
-		{"git", "push", "origin", "HEAD"},
-	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "command %v failed: %s", args, string(out))
+	if "clean-repo" != statuses[0].Name {
+		t.Fatalf("want %v, got %v", "clean-repo", statuses[0].Name)
 	}
-
-	// Make a local commit without pushing (ahead by 1).
-	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("v2"), 0644))
-	for _, args := range [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", "local commit"},
-	} {
-		cmd = exec.Command(args[0], args[1:]...)
-		cmd.Dir = cloneDir
-		require.NoError(t, cmd.Run())
+	if "dirty-repo" != statuses[1].Name {
+		t.Fatalf("want %v, got %v", "dirty-repo", statuses[1].Name)
 	}
-
-	ahead, behind, err := getAheadBehind(context.Background(), cloneDir)
-	assert.NoError(t, err)
-	assert.Equal(t, 1, ahead, "should be 1 commit ahead")
-	assert.Equal(t, 0, behind, "should not be behind")
+	if statuses[0].IsDirty() {
+		t.Fatal("expected false")
+	}
+	if !statuses[1].IsDirty() {
+		t.Fatal("expected true")
+	}
 }
 
-// --- Renamed file detection ---
+func TestGit_StatusIter_Bad(t *testing.T) {
+	statuses := slices.Collect(StatusIter(context.Background(), StatusOptions{
+		Paths: []string{"relative/path"},
+	}))
 
-func TestGetStatus_Good_RenamedFile(t *testing.T) {
-	dir, _ := filepath.Abs(initTestRepo(t))
+	if len(statuses) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(statuses))
+	}
+	if statuses[0].Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	assertGitError(t, statuses[0].Error, "relative/path")
+}
 
-	// Rename via git mv (stages the rename).
-	cmd := exec.Command("git", "mv", "README.md", "GUIDE.md")
-	cmd.Dir = dir
-	require.NoError(t, cmd.Run())
+func TestGit_StatusIter_Ugly(t *testing.T) {
+	t.Run("empty paths", func(t *testing.T) {
+		statuses := slices.Collect(StatusIter(context.Background(), StatusOptions{}))
+		if len(statuses) != 0 {
+			t.Fatalf("want %v, got %v", 0, len(statuses))
+		}
+	})
 
-	status := getStatus(context.Background(), dir, "renamed-repo")
-	require.NoError(t, status.Error)
-	assert.Equal(t, 1, status.Staged, "rename should count as staged")
-	assert.True(t, status.IsDirty())
+	t.Run("yield stops early", func(t *testing.T) {
+		dir1 := initTestRepo(t)
+		dir2 := initTestRepo(t)
+
+		var statuses []RepoStatus
+		StatusIter(context.Background(), StatusOptions{Paths: []string{dir1, dir2}})(func(st RepoStatus) bool {
+			statuses = append(statuses, st)
+			return false
+		})
+
+		if len(statuses) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(statuses))
+		}
+	})
+}
+
+func TestGit_GetAheadBehind_Good(t *testing.T) {
+	t.Run("ahead with upstream", func(t *testing.T) {
+		dir := initPushableRepo(t)
+
+		ahead, behind, err := getAheadBehind(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if 1 != ahead {
+			t.Fatalf("should be 1 commit ahead: want %v, got %v", 1, ahead)
+		}
+		if 0 != behind {
+			t.Fatalf("should not be behind: want %v, got %v", 0, behind)
+		}
+	})
+
+	t.Run("behind with upstream", func(t *testing.T) {
+		dir := initPullableRepo(t)
+		runTestGit(t, dir, "fetch", "origin")
+
+		ahead, behind, err := getAheadBehind(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if 0 != ahead {
+			t.Fatalf("should not be ahead: want %v, got %v", 0, ahead)
+		}
+		if 1 != behind {
+			t.Fatalf("should be 1 commit behind: want %v, got %v", 1, behind)
+		}
+	})
+}
+
+func TestGit_GetAheadBehind_Bad(t *testing.T) {
+	t.Run("relative path", func(t *testing.T) {
+		_, _, err := getAheadBehind(context.Background(), "relative/path")
+		assertErrorContains(t, err, "path must be absolute")
+		assertGitError(t, err, "relative/path")
+	})
+
+	t.Run("not a repo", func(t *testing.T) {
+		_, _, err := getAheadBehind(context.Background(), t.TempDir())
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestGit_GetAheadBehind_Ugly(t *testing.T) {
+	dir := initTestRepo(t)
+
+	ahead, behind, err := getAheadBehind(nil, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ahead != 0 || behind != 0 {
+		t.Fatalf("repo without upstream should be 0/0, got %d/%d", ahead, behind)
+	}
+}
+
+func TestGit_PushMultiple_Good(t *testing.T) {
+	dir1 := initPushableRepo(t)
+	dir2 := initPushableRepo(t)
+
+	results, err := PushMultiple(context.Background(), []string{dir1, dir2}, map[string]string{
+		dir1: "repo-1",
+		dir2: "repo-2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("want %v, got %v", 2, len(results))
+	}
+	for i, result := range results {
+		if !result.Success {
+			t.Fatalf("result %d should succeed: %+v", i, result)
+		}
+		if result.Error != nil {
+			t.Fatalf("unexpected result error: %v", result.Error)
+		}
+	}
+}
+
+func TestGit_PushMultiple_Bad(t *testing.T) {
+	t.Run("relative path", func(t *testing.T) {
+		results, err := PushMultiple(context.Background(), []string{"relative/repo"}, nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		assertErrorContains(t, results[0].Error, "path must be absolute")
+		assertGitError(t, results[0].Error, "relative/repo")
+		assertGitError(t, err, "relative/repo")
+	})
+
+	t.Run("no remote", func(t *testing.T) {
+		dir := initTestRepo(t)
+		results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{dir: "test-repo"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		if results[0].Success {
+			t.Fatal("expected false")
+		}
+		if results[0].Error == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestGit_PushMultiple_Ugly(t *testing.T) {
+	t.Run("empty paths", func(t *testing.T) {
+		results, err := PushMultiple(context.Background(), []string{}, map[string]string{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 0 {
+			t.Fatalf("want %v, got %v", 0, len(results))
+		}
+	})
+
+	t.Run("name fallback", func(t *testing.T) {
+		dir := initTestRepo(t)
+
+		results, err := PushMultiple(context.Background(), []string{dir}, map[string]string{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		if dir != results[0].Name {
+			t.Fatalf("name should fall back to path: want %v, got %v", dir, results[0].Name)
+		}
+	})
+}
+
+func TestGit_PullMultiple_Good(t *testing.T) {
+	dir1 := initPullableRepo(t)
+	dir2 := initPullableRepo(t)
+
+	results, err := PullMultiple(context.Background(), []string{dir1, dir2}, map[string]string{
+		dir1: "repo-1",
+		dir2: "repo-2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("want %v, got %v", 2, len(results))
+	}
+	for i, result := range results {
+		if !result.Success {
+			t.Fatalf("result %d should succeed: %+v", i, result)
+		}
+		if result.Error != nil {
+			t.Fatalf("unexpected result error: %v", result.Error)
+		}
+	}
+}
+
+func TestGit_PullMultiple_Bad(t *testing.T) {
+	t.Run("relative path", func(t *testing.T) {
+		results, err := PullMultiple(context.Background(), []string{"relative/repo"}, nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		assertErrorContains(t, results[0].Error, "path must be absolute")
+		assertGitError(t, results[0].Error, "relative/repo")
+		assertGitError(t, err, "relative/repo")
+	})
+
+	t.Run("no remote", func(t *testing.T) {
+		dir := initTestRepo(t)
+		results, err := PullMultiple(context.Background(), []string{dir}, map[string]string{dir: "test-repo"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		if results[0].Success {
+			t.Fatal("expected false")
+		}
+		if results[0].Error == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestGit_PullMultiple_Ugly(t *testing.T) {
+	t.Run("empty paths", func(t *testing.T) {
+		results, err := PullMultiple(context.Background(), []string{}, map[string]string{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 0 {
+			t.Fatalf("want %v, got %v", 0, len(results))
+		}
+	})
+
+	t.Run("name fallback", func(t *testing.T) {
+		dir := initTestRepo(t)
+
+		results, err := PullMultiple(context.Background(), []string{dir}, map[string]string{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if len(results) != 1 {
+			t.Fatalf("want %v, got %v", 1, len(results))
+		}
+		if dir != results[0].Name {
+			t.Fatalf("name should fall back to path: want %v, got %v", dir, results[0].Name)
+		}
+	})
+}
+
+func TestGit_PushMultipleIter_Good(t *testing.T) {
+	dir := initPushableRepo(t)
+
+	results := slices.Collect(PushMultipleIter(context.Background(), []string{dir}, map[string]string{dir: "test-repo"}))
+
+	if len(results) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(results))
+	}
+	if "test-repo" != results[0].Name {
+		t.Fatalf("want %v, got %v", "test-repo", results[0].Name)
+	}
+	if !results[0].Success {
+		t.Fatal("expected true")
+	}
+	if results[0].Error != nil {
+		t.Fatalf("unexpected error: %v", results[0].Error)
+	}
+}
+
+func TestGit_PushMultipleIter_Bad(t *testing.T) {
+	results := slices.Collect(PushMultipleIter(context.Background(), []string{"relative/repo"}, nil))
+
+	if len(results) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(results))
+	}
+	if results[0].Success {
+		t.Fatal("expected false")
+	}
+	assertErrorContains(t, results[0].Error, "path must be absolute")
+}
+
+func TestGit_PushMultipleIter_Ugly(t *testing.T) {
+	dir := initPushableRepo(t)
+
+	var results []PushResult
+	PushMultipleIter(context.Background(), []string{"relative/repo", dir}, nil)(func(result PushResult) bool {
+		results = append(results, result)
+		return false
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(results))
+	}
+	if results[0].Path != "relative/repo" {
+		t.Fatalf("want %v, got %v", "relative/repo", results[0].Path)
+	}
+}
+
+func TestGit_PullMultipleIter_Good(t *testing.T) {
+	dir := initPullableRepo(t)
+
+	results := slices.Collect(PullMultipleIter(context.Background(), []string{dir}, map[string]string{dir: "test-repo"}))
+
+	if len(results) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(results))
+	}
+	if "test-repo" != results[0].Name {
+		t.Fatalf("want %v, got %v", "test-repo", results[0].Name)
+	}
+	if !results[0].Success {
+		t.Fatal("expected true")
+	}
+	if results[0].Error != nil {
+		t.Fatalf("unexpected error: %v", results[0].Error)
+	}
+}
+
+func TestGit_PullMultipleIter_Bad(t *testing.T) {
+	results := slices.Collect(PullMultipleIter(context.Background(), []string{"relative/repo"}, nil))
+
+	if len(results) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(results))
+	}
+	if results[0].Success {
+		t.Fatal("expected false")
+	}
+	assertErrorContains(t, results[0].Error, "path must be absolute")
+}
+
+func TestGit_PullMultipleIter_Ugly(t *testing.T) {
+	dir := initPullableRepo(t)
+
+	var results []PullResult
+	PullMultipleIter(context.Background(), []string{"relative/repo", dir}, nil)(func(result PullResult) bool {
+		results = append(results, result)
+		return false
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(results))
+	}
+	if results[0].Path != "relative/repo" {
+		t.Fatalf("want %v, got %v", "relative/repo", results[0].Path)
+	}
+}
+
+func TestGit_Trim_Good(t *testing.T) {
+	if got := trim(" value \n"); got != "value" {
+		t.Fatalf("want %v, got %v", "value", got)
+	}
+}
+
+func TestGit_Trim_Bad(t *testing.T) {
+	if got := trim(""); got != "" {
+		t.Fatalf("want empty string, got %v", got)
+	}
+}
+
+func TestGit_Trim_Ugly(t *testing.T) {
+	if got := trim("\n\t "); got != "" {
+		t.Fatalf("want empty string, got %v", got)
+	}
 }
