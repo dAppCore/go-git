@@ -185,7 +185,13 @@ func localSymlinkTarget(t *testing.T) string {
 	return target
 }
 
-func TestGit_RepoStatusIsDirty_Good(t *testing.T) {
+type failingCapture struct{}
+
+func (failingCapture) Write([]byte) (int, error) {
+	return 0, errors.New("capture failed")
+}
+
+func TestGit_RepoStatus_IsDirty_Good(t *testing.T) {
 	tests := []struct {
 		name   string
 		status RepoStatus
@@ -205,14 +211,14 @@ func TestGit_RepoStatusIsDirty_Good(t *testing.T) {
 	}
 }
 
-func TestGit_RepoStatusIsDirty_Bad(t *testing.T) {
+func TestGit_RepoStatus_IsDirty_Bad(t *testing.T) {
 	status := RepoStatus{Modified: -1, Untracked: -1, Staged: -1}
 	if status.IsDirty() {
 		t.Fatal("negative counters should not mark a repo dirty")
 	}
 }
 
-func TestGit_RepoStatusIsDirty_Ugly(t *testing.T) {
+func TestGit_RepoStatus_IsDirty_Ugly(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
@@ -232,21 +238,21 @@ func TestGit_RepoStatusIsDirty_Ugly(t *testing.T) {
 	}
 }
 
-func TestGit_RepoStatusHasUnpushed_Good(t *testing.T) {
+func TestGit_RepoStatus_HasUnpushed_Good(t *testing.T) {
 	status := RepoStatus{Ahead: 3}
 	if !status.HasUnpushed() {
 		t.Fatal("expected true")
 	}
 }
 
-func TestGit_RepoStatusHasUnpushed_Bad(t *testing.T) {
+func TestGit_RepoStatus_HasUnpushed_Bad(t *testing.T) {
 	status := RepoStatus{Ahead: -1}
 	if status.HasUnpushed() {
 		t.Fatal("negative ahead count should not mark a repo unpushed")
 	}
 }
 
-func TestGit_RepoStatusHasUnpushed_Ugly(t *testing.T) {
+func TestGit_RepoStatus_HasUnpushed_Ugly(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
@@ -266,21 +272,21 @@ func TestGit_RepoStatusHasUnpushed_Ugly(t *testing.T) {
 	}
 }
 
-func TestGit_RepoStatusHasUnpulled_Good(t *testing.T) {
+func TestGit_RepoStatus_HasUnpulled_Good(t *testing.T) {
 	status := RepoStatus{Behind: 2}
 	if !status.HasUnpulled() {
 		t.Fatal("expected true")
 	}
 }
 
-func TestGit_RepoStatusHasUnpulled_Bad(t *testing.T) {
+func TestGit_RepoStatus_HasUnpulled_Bad(t *testing.T) {
 	status := RepoStatus{Behind: -1}
 	if status.HasUnpulled() {
 		t.Fatal("negative behind count should not mark a repo unpulled")
 	}
 }
 
-func TestGit_RepoStatusHasUnpulled_Ugly(t *testing.T) {
+func TestGit_RepoStatus_HasUnpulled_Ugly(t *testing.T) {
 	tests := []struct {
 		name     string
 		status   RepoStatus
@@ -300,7 +306,7 @@ func TestGit_RepoStatusHasUnpulled_Ugly(t *testing.T) {
 	}
 }
 
-func TestGit_GitErrorError_Good(t *testing.T) {
+func TestGit_GitError_Error_Good(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      *GitError
@@ -327,7 +333,7 @@ func TestGit_GitErrorError_Good(t *testing.T) {
 	}
 }
 
-func TestGit_GitErrorError_Bad(t *testing.T) {
+func TestGit_GitError_Error_Bad(t *testing.T) {
 	err := &GitError{Args: []string{"status"}}
 	expected := "git command \"git status\" failed"
 	if got := err.Error(); got != expected {
@@ -335,7 +341,7 @@ func TestGit_GitErrorError_Bad(t *testing.T) {
 	}
 }
 
-func TestGit_GitErrorError_Ugly(t *testing.T) {
+func TestGit_GitError_Error_Ugly(t *testing.T) {
 	err := &GitError{
 		Args:   []string{"status", "--short"},
 		Err:    errors.New("fallback"),
@@ -347,7 +353,7 @@ func TestGit_GitErrorError_Ugly(t *testing.T) {
 	}
 }
 
-func TestGit_GitErrorUnwrap_Good(t *testing.T) {
+func TestGit_GitError_Unwrap_Good(t *testing.T) {
 	inner := errors.New("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
 	if got := gitErr.Unwrap(); inner != got {
@@ -355,14 +361,14 @@ func TestGit_GitErrorUnwrap_Good(t *testing.T) {
 	}
 }
 
-func TestGit_GitErrorUnwrap_Bad(t *testing.T) {
+func TestGit_GitError_Unwrap_Bad(t *testing.T) {
 	gitErr := &GitError{}
 	if got := gitErr.Unwrap(); got != nil {
 		t.Fatalf("expected nil, got %v", got)
 	}
 }
 
-func TestGit_GitErrorUnwrap_Ugly(t *testing.T) {
+func TestGit_GitError_Unwrap_Ugly(t *testing.T) {
 	inner := errors.New("underlying error")
 	gitErr := &GitError{Err: inner, Stderr: "stderr output"}
 	if !errors.Is(gitErr, inner) {
@@ -406,6 +412,71 @@ func TestGit_IsNonFastForward_Ugly(t *testing.T) {
 	}
 	if !IsNonFastForward(err) {
 		t.Fatal("expected mixed-case wrapped git error to match")
+	}
+}
+
+func TestGit_Tee_Write_Good(t *testing.T) {
+	oldStderr := os.Stderr
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr-*")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	os.Stderr = stderrFile
+	defer func() { os.Stderr = oldStderr }()
+
+	var capture strings.Builder
+	n, err := stderrTee{capture: &capture}.Write([]byte("git stderr"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != len("git stderr") {
+		t.Fatalf("want %v, got %v", len("git stderr"), n)
+	}
+	if capture.String() != "git stderr" {
+		t.Fatalf("want %v, got %v", "git stderr", capture.String())
+	}
+}
+
+func TestGit_Tee_Write_Bad(t *testing.T) {
+	oldStderr := os.Stderr
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr-*")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	os.Stderr = stderrFile
+	defer func() { os.Stderr = oldStderr }()
+
+	n, err := stderrTee{capture: failingCapture{}}.Write([]byte("git stderr"))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if n != 0 {
+		t.Fatalf("want %v, got %v", 0, n)
+	}
+	if !strings.Contains(err.Error(), "capture failed") {
+		t.Fatalf("expected %v to contain %v", err.Error(), "capture failed")
+	}
+}
+
+func TestGit_Tee_Write_Ugly(t *testing.T) {
+	oldStderr := os.Stderr
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr-*")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	os.Stderr = stderrFile
+	defer func() { os.Stderr = oldStderr }()
+
+	var capture strings.Builder
+	n, err := stderrTee{capture: &capture}.Write(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("want %v, got %v", 0, n)
+	}
+	if capture.String() != "" {
+		t.Fatalf("want empty capture, got %q", capture.String())
 	}
 }
 
@@ -493,11 +564,13 @@ func TestGit_RequireAbsolutePath_Good(t *testing.T) {
 func TestGit_RequireAbsolutePath_Bad(t *testing.T) {
 	err := requireAbsolutePath("git.test", "relative/path")
 	assertErrorContains(t, err, "path must be absolute")
+	assertGitError(t, err, "relative/path")
 }
 
 func TestGit_RequireAbsolutePath_Ugly(t *testing.T) {
 	err := requireAbsolutePath("git.test", "")
 	assertErrorContains(t, err, "path must be absolute")
+	assertGitError(t, err, "")
 }
 
 func TestGit_ParseGitCount_Good(t *testing.T) {
@@ -511,7 +584,10 @@ func TestGit_ParseGitCount_Good(t *testing.T) {
 }
 
 func TestGit_ParseGitCount_Bad(t *testing.T) {
-	_, err := parseGitCount("ahead", "not-a-number")
+	got, err := parseGitCount("ahead", "not-a-number")
+	if got != 0 {
+		t.Fatalf("want %v, got %v", 0, got)
+	}
 	assertErrorContains(t, err, "failed to parse ahead count")
 }
 

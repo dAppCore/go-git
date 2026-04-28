@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"dappco.re/go/core"
+	core "dappco.re/go"
 )
 
 // --- validatePath tests ---
@@ -246,7 +246,7 @@ func TestService_Action_Bad_PullMultipleInvalidNames(t *testing.T) {
 	assertServiceGitError(t, err, "names must be map[string]string")
 }
 
-func TestNewService_Good(t *testing.T) {
+func TestService_NewService_Good(t *testing.T) {
 	opts := ServiceOptions{WorkDir: t.TempDir()}
 	factory := NewService(opts)
 	if factory == nil {
@@ -273,7 +273,43 @@ func TestNewService_Good(t *testing.T) {
 	}
 }
 
-func TestService_OnStartup_Good(t *testing.T) {
+func TestService_NewService_Bad(t *testing.T) {
+	factory := NewService(ServiceOptions{WorkDir: "relative/workdir"})
+	c := core.New()
+
+	svc, err := factory(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	service, ok := svc.(*Service)
+	if !ok {
+		t.Fatalf("expected *Service, got %T", svc)
+	}
+	if service.opts.WorkDir != "relative/workdir" {
+		t.Fatalf("want %v, got %v", "relative/workdir", service.opts.WorkDir)
+	}
+}
+
+func TestService_NewService_Ugly(t *testing.T) {
+	factory := NewService(ServiceOptions{})
+	svc, err := factory(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	service, ok := svc.(*Service)
+	if !ok {
+		t.Fatalf("expected *Service, got %T", svc)
+	}
+	if service.ServiceRuntime == nil {
+		t.Fatal("expected non-nil ServiceRuntime")
+	}
+	if service.opts.WorkDir != "" {
+		t.Fatalf("want empty WorkDir, got %v", service.opts.WorkDir)
+	}
+}
+
+func TestService_Service_OnStartup_Good(t *testing.T) {
 	c := core.New()
 
 	opts := ServiceOptions{WorkDir: t.TempDir()}
@@ -285,6 +321,39 @@ func TestService_OnStartup_Good(t *testing.T) {
 	result := svc.OnStartup(context.Background())
 	if !result.OK {
 		t.Fatal("expected true")
+	}
+}
+
+func TestService_Service_OnStartup_Bad(t *testing.T) {
+	c := core.New()
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+		opts:           ServiceOptions{},
+	}
+
+	result := svc.OnStartup(context.Background())
+	if !result.OK {
+		t.Fatal("expected startup to succeed")
+	}
+	if !c.Action("git.push").Exists() {
+		t.Fatal("expected git.push action to be registered")
+	}
+}
+
+func TestService_Service_OnStartup_Ugly(t *testing.T) {
+	c := core.New()
+	svc := &Service{
+		ServiceRuntime: core.NewServiceRuntime(c, ServiceOptions{}),
+		opts:           ServiceOptions{},
+	}
+
+	first := svc.OnStartup(context.Background())
+	second := svc.OnStartup(context.Background())
+	if !first.OK || !second.OK {
+		t.Fatalf("expected repeated startup to succeed: %v %v", first, second)
+	}
+	if !c.Action("git.pull-multiple").Exists() {
+		t.Fatal("expected git.pull-multiple action to remain registered")
 	}
 }
 
