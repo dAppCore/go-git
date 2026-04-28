@@ -20,7 +20,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
@@ -46,17 +46,13 @@ func verifyStatus(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = os.RemoveAll(clean)
-	}()
+	defer cleanupTempDir(clean)
 
 	dirty, err := initRepo()
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = os.RemoveAll(dirty)
-	}()
+	defer cleanupTempDir(dirty)
 
 	if err := os.WriteFile(filepath.Join(dirty, "README.md"), []byte("# Changed\n"), 0644); err != nil {
 		return err
@@ -139,9 +135,7 @@ func verifyPushPull(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = os.RemoveAll(root)
-	}()
+	defer cleanupTempDir(root)
 
 	remote := filepath.Join(root, "remote.git")
 	pushClone := filepath.Join(root, "push")
@@ -275,18 +269,24 @@ func initRepo() (string, error) {
 		return "", err
 	}
 	if err := runGit(dir, "init"); err != nil {
-		_ = os.RemoveAll(dir)
+		cleanupTempDir(dir)
 		return "", err
 	}
 	if err := configureUser(dir); err != nil {
-		_ = os.RemoveAll(dir)
+		cleanupTempDir(dir)
 		return "", err
 	}
 	if err := commitFile(dir, "README.md", "# Test\n", "initial commit"); err != nil {
-		_ = os.RemoveAll(dir)
+		cleanupTempDir(dir)
 		return "", err
 	}
 	return dir, nil
+}
+
+func cleanupTempDir(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		fmt.Fprintf(os.Stderr, "cleanup %s: %v\n", path, err)
+	}
 }
 
 func configureUser(dir string) error {

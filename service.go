@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"dappco.re/go/core"
+	core "dappco.re/go"
 )
 
 // Queries for git service
@@ -118,7 +118,7 @@ func (s *Service) OnStartup(ctx context.Context) core.Result {
 		return s.runPullMultiple(ctx, paths, names)
 	})
 
-	return core.Result{OK: true}
+	return core.Ok(nil)
 }
 
 // handleTaskMessage bridges task structs onto the Core action bus.
@@ -133,7 +133,7 @@ func (s *Service) handleTaskMessage(c *core.Core, msg core.Message) core.Result 
 	case TaskPullMultiple:
 		return s.handleTask(c, m)
 	default:
-		return core.Result{}
+		return core.Fail(nil)
 	}
 }
 
@@ -157,17 +157,17 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 		s.lastStatus = statuses
 		statusLock.Mutex.Unlock()
 
-		return core.Result{Value: statuses, OK: true}
+		return core.Ok(statuses)
 
 	case QueryDirtyRepos:
-		return core.Result{Value: s.DirtyRepos(), OK: true}
+		return core.Ok(s.DirtyRepos())
 
 	case QueryAheadRepos:
-		return core.Result{Value: s.AheadRepos(), OK: true}
+		return core.Ok(s.AheadRepos())
 	case QueryBehindRepos:
-		return core.Result{Value: s.BehindRepos(), OK: true}
+		return core.Ok(s.BehindRepos())
 	}
-	return core.Result{}
+	return core.Fail(nil)
 }
 
 func (s *Service) handleTask(c *core.Core, t any) core.Result {
@@ -198,7 +198,7 @@ func (s *Service) runPush(ctx context.Context, path string) core.Result {
 	if err := Push(ctx, path); err != nil {
 		return s.logError(err, "git.push", "push failed")
 	}
-	return core.Result{OK: true}
+	return core.Ok(nil)
 }
 
 func (s *Service) runPull(ctx context.Context, path string) core.Result {
@@ -209,7 +209,7 @@ func (s *Service) runPull(ctx context.Context, path string) core.Result {
 	if err := Pull(ctx, path); err != nil {
 		return s.logError(err, "git.pull", "pull failed")
 	}
-	return core.Result{OK: true}
+	return core.Ok(nil)
 }
 
 func (s *Service) runPushMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
@@ -219,9 +219,9 @@ func (s *Service) runPushMultiple(ctx context.Context, paths []string, names map
 	}
 	results, err := PushMultiple(ctx, resolvedPaths, resolvedNames(paths, resolvedPaths, names))
 	if err != nil {
-		_ = s.logError(err, "git.push-multiple", "push multiple had failures")
+		err = s.logAggregateError(err, "git.push-multiple", "push multiple had failures")
 	}
-	return core.Result{Value: results, OK: err == nil}
+	return resultWithOK(results, err == nil)
 }
 
 func (s *Service) runPullMultiple(ctx context.Context, paths []string, names map[string]string) core.Result {
@@ -231,9 +231,9 @@ func (s *Service) runPullMultiple(ctx context.Context, paths []string, names map
 	}
 	results, err := PullMultiple(ctx, resolvedPaths, resolvedNames(paths, resolvedPaths, names))
 	if err != nil {
-		_ = s.logError(err, "git.pull-multiple", "pull multiple had failures")
+		err = s.logAggregateError(err, "git.pull-multiple", "pull multiple had failures")
 	}
-	return core.Result{Value: results, OK: err == nil}
+	return resultWithOK(results, err == nil)
 }
 
 func multipleActionPayload(opts core.Options, op string) ([]string, map[string]string, error) {
@@ -336,9 +336,23 @@ func resolvedNames(paths, resolvedPaths []string, names map[string]string) map[s
 
 func (s *Service) logError(err error, op, msg string) core.Result {
 	if s.ServiceRuntime == nil || s.Core() == nil {
-		return core.Result{Value: err, OK: false}
+		return core.Fail(err)
 	}
 	return s.Core().LogError(err, op, msg)
+}
+
+func (s *Service) logAggregateError(err error, op, msg string) error {
+	r := s.logError(err, op, msg)
+	if loggedErr, ok := r.Value.(error); ok {
+		return loggedErr
+	}
+	return err
+}
+
+func resultWithOK(value any, ok bool) core.Result {
+	r := core.Ok(value)
+	r.OK = ok
+	return r
 }
 
 func gitValidationError(msg, path, workDir string, err error) *GitError {

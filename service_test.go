@@ -16,7 +16,7 @@ func statusNames(statuses []RepoStatus) []string {
 	return names
 }
 
-func TestService_DirtyRepos_Good(t *testing.T) {
+func TestService_Service_DirtyRepos_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "clean"},
@@ -41,7 +41,7 @@ func TestService_DirtyRepos_Good(t *testing.T) {
 	}
 }
 
-func TestService_DirtyRepos_Bad(t *testing.T) {
+func TestService_Service_DirtyRepos_Bad(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "dirty-error", Modified: 1, Error: errors.New("status failed")},
@@ -55,7 +55,7 @@ func TestService_DirtyRepos_Bad(t *testing.T) {
 	}
 }
 
-func TestService_DirtyRepos_Ugly(t *testing.T) {
+func TestService_Service_DirtyRepos_Ugly(t *testing.T) {
 	tests := []struct {
 		name string
 		svc  *Service
@@ -75,7 +75,7 @@ func TestService_DirtyRepos_Ugly(t *testing.T) {
 	}
 }
 
-func TestService_AheadRepos_Good(t *testing.T) {
+func TestService_Service_AheadRepos_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "up-to-date", Ahead: 0},
@@ -98,7 +98,7 @@ func TestService_AheadRepos_Good(t *testing.T) {
 	}
 }
 
-func TestService_AheadRepos_Bad(t *testing.T) {
+func TestService_Service_AheadRepos_Bad(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "ahead-error", Ahead: 2, Error: errors.New("status failed")},
@@ -112,7 +112,7 @@ func TestService_AheadRepos_Bad(t *testing.T) {
 	}
 }
 
-func TestService_AheadRepos_Ugly(t *testing.T) {
+func TestService_Service_AheadRepos_Ugly(t *testing.T) {
 	tests := []struct {
 		name string
 		svc  *Service
@@ -132,7 +132,7 @@ func TestService_AheadRepos_Ugly(t *testing.T) {
 	}
 }
 
-func TestService_BehindRepos_Good(t *testing.T) {
+func TestService_Service_BehindRepos_Good(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "synced", Behind: 0},
@@ -155,7 +155,7 @@ func TestService_BehindRepos_Good(t *testing.T) {
 	}
 }
 
-func TestService_BehindRepos_Bad(t *testing.T) {
+func TestService_Service_BehindRepos_Bad(t *testing.T) {
 	s := &Service{
 		lastStatus: []RepoStatus{
 			{Name: "behind-error", Behind: 2, Error: errors.New("status failed")},
@@ -169,7 +169,7 @@ func TestService_BehindRepos_Bad(t *testing.T) {
 	}
 }
 
-func TestService_BehindRepos_Ugly(t *testing.T) {
+func TestService_Service_BehindRepos_Ugly(t *testing.T) {
 	tests := []struct {
 		name string
 		svc  *Service
@@ -269,7 +269,135 @@ func TestService_Iterators_Ugly(t *testing.T) {
 	}
 }
 
-func TestService_Status_Good(t *testing.T) {
+func TestService_Service_All_Good(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "clean"}, {Name: "dirty", Modified: 1}}}
+
+	all := slices.Collect(s.All())
+	if len(all) != 2 {
+		t.Fatalf("want %v, got %v", 2, len(all))
+	}
+	if all[0].Name != "clean" || all[1].Name != "dirty" {
+		t.Fatalf("unexpected statuses: %v", all)
+	}
+}
+
+func TestService_Service_All_Bad(t *testing.T) {
+	s := &Service{}
+
+	all := slices.Collect(s.All())
+	if len(all) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(all))
+	}
+}
+
+func TestService_Service_All_Ugly(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "before"}}}
+	iter := s.All()
+	s.lastStatus[0].Name = "after"
+
+	all := slices.Collect(iter)
+	if len(all) != 1 || all[0].Name != "before" {
+		t.Fatalf("iterator should use a snapshot, got %v", all)
+	}
+}
+
+func TestService_Service_Dirty_Good(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "clean"}, {Name: "dirty", Modified: 1}}}
+
+	dirty := slices.Collect(s.Dirty())
+	if len(dirty) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(dirty))
+	}
+	if dirty[0].Name != "dirty" {
+		t.Fatalf("want %v, got %v", "dirty", dirty[0].Name)
+	}
+}
+
+func TestService_Service_Dirty_Bad(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "errored", Modified: 1, Error: errors.New("status failed")}}}
+
+	dirty := slices.Collect(s.Dirty())
+	if len(dirty) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(dirty))
+	}
+}
+
+func TestService_Service_Dirty_Ugly(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "dirty", Modified: 1}}}
+	iter := s.Dirty()
+	s.lastStatus[0].Modified = 0
+
+	dirty := slices.Collect(iter)
+	if len(dirty) != 1 || dirty[0].Name != "dirty" {
+		t.Fatalf("iterator should use a snapshot, got %v", dirty)
+	}
+}
+
+func TestService_Service_Ahead_Good(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "synced"}, {Name: "ahead", Ahead: 1}}}
+
+	ahead := slices.Collect(s.Ahead())
+	if len(ahead) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(ahead))
+	}
+	if ahead[0].Name != "ahead" {
+		t.Fatalf("want %v, got %v", "ahead", ahead[0].Name)
+	}
+}
+
+func TestService_Service_Ahead_Bad(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "errored", Ahead: 1, Error: errors.New("status failed")}}}
+
+	ahead := slices.Collect(s.Ahead())
+	if len(ahead) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(ahead))
+	}
+}
+
+func TestService_Service_Ahead_Ugly(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "ahead", Ahead: 1}}}
+	iter := s.Ahead()
+	s.lastStatus[0].Ahead = 0
+
+	ahead := slices.Collect(iter)
+	if len(ahead) != 1 || ahead[0].Name != "ahead" {
+		t.Fatalf("iterator should use a snapshot, got %v", ahead)
+	}
+}
+
+func TestService_Service_Behind_Good(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "synced"}, {Name: "behind", Behind: 1}}}
+
+	behind := slices.Collect(s.Behind())
+	if len(behind) != 1 {
+		t.Fatalf("want %v, got %v", 1, len(behind))
+	}
+	if behind[0].Name != "behind" {
+		t.Fatalf("want %v, got %v", "behind", behind[0].Name)
+	}
+}
+
+func TestService_Service_Behind_Bad(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "errored", Behind: 1, Error: errors.New("status failed")}}}
+
+	behind := slices.Collect(s.Behind())
+	if len(behind) != 0 {
+		t.Fatalf("want %v, got %v", 0, len(behind))
+	}
+}
+
+func TestService_Service_Behind_Ugly(t *testing.T) {
+	s := &Service{lastStatus: []RepoStatus{{Name: "behind", Behind: 1}}}
+	iter := s.Behind()
+	s.lastStatus[0].Behind = 0
+
+	behind := slices.Collect(iter)
+	if len(behind) != 1 || behind[0].Name != "behind" {
+		t.Fatalf("iterator should use a snapshot, got %v", behind)
+	}
+}
+
+func TestService_Service_Status_Good(t *testing.T) {
 	expected := []RepoStatus{
 		{Name: "repo1", Branch: "main"},
 		{Name: "repo2", Branch: "develop"},
@@ -281,7 +409,7 @@ func TestService_Status_Good(t *testing.T) {
 	}
 }
 
-func TestService_Status_Bad(t *testing.T) {
+func TestService_Service_Status_Bad(t *testing.T) {
 	s := &Service{lastStatus: []RepoStatus{{Name: "repo1", Branch: "main"}}}
 
 	statuses := s.Status()
@@ -292,7 +420,7 @@ func TestService_Status_Bad(t *testing.T) {
 	}
 }
 
-func TestService_Status_Ugly(t *testing.T) {
+func TestService_Service_Status_Ugly(t *testing.T) {
 	s := &Service{}
 	if got := s.Status(); got != nil {
 		t.Fatalf("expected nil, got %v", got)
