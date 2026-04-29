@@ -2,23 +2,67 @@
 package git
 
 import (
-	"bytes"
-	"context" // Note: intrinsic — cancellation propagation for git subprocesses and iterators; no core equivalent
-	"fmt"
-	"iter"    // Note: intrinsic — public lazy sequence API for repository operations; no core equivalent
-	"os"      // Note: intrinsic — interactive git subprocess standard streams; no core equivalent
-	"os/exec" // Note: intrinsic — executing the git CLI for repository operations; no core equivalent
-	"path/filepath"
-	"slices" // Note: intrinsic — collecting and cloning iterator-backed result slices; no core equivalent
-	"strconv"
-	"strings"
+	"iter"
+
+	core "dappco.re/go"
 )
 
-func withBackground(ctx context.Context) context.Context {
+func withBackground(ctx core.Context) core.Context {
 	if ctx != nil {
 		return ctx
 	}
-	return context.Background()
+	return core.Background()
+}
+
+func collectSeq[T any](seq iter.Seq[T]) []T {
+	var out []T
+	for value := range seq {
+		out = append(out, value)
+	}
+	return out
+}
+
+func resultError(r core.Result) *GitError {
+	if gitErr, ok := r.Value.(*GitError); ok {
+		return gitErr
+	}
+	if err, ok := r.Value.(error); ok {
+		return &GitError{Err: err, Stderr: err.Error()}
+	}
+	if r.Value != nil {
+		msg := core.Sprint(r.Value)
+		return &GitError{Err: core.NewError(msg), Stderr: msg}
+	}
+	return &GitError{Err: core.NewError("operation failed"), Stderr: "operation failed"}
+}
+
+func gitCmd(dir string, args ...string) *core.Cmd {
+	cmdArgs := append([]string{"env", "git"}, args...)
+	return &core.Cmd{
+		Path: "/usr/bin/env",
+		Args: cmdArgs,
+		Dir:  dir,
+	}
+}
+
+func lastPushError(results []PushResult) *GitError {
+	var last *GitError
+	for _, result := range results {
+		if result.Error != nil {
+			last = resultError(core.Fail(result.Error))
+		}
+	}
+	return last
+}
+
+func lastPullError(results []PullResult) *GitError {
+	var last *GitError
+	for _, result := range results {
+		if result.Error != nil {
+			last = resultError(core.Fail(result.Error))
+		}
+	}
+	return last
 }
 
 // RepoStatus represents the git status of a single repository.
@@ -62,8 +106,8 @@ type StatusOptions struct {
 // Example:
 //
 //	statuses := Status(ctx, StatusOptions{Paths: []string{"/home/user/Code/core/agent"}})
-func Status(ctx context.Context, opts StatusOptions) []RepoStatus {
-	return slices.Collect(StatusIter(withBackground(ctx), opts))
+func Status(ctx core.Context, opts StatusOptions) []RepoStatus {
+	return collectSeq(StatusIter(withBackground(ctx), opts))
 }
 
 func repoName(path string, names map[string]string) string {
@@ -80,7 +124,7 @@ func repoName(path string, names map[string]string) string {
 
 // StatusIter checks git status for multiple repositories in parallel and yields
 // the results in input order.
-func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
+func StatusIter(ctx core.Context, opts StatusOptions) iter.Seq[RepoStatus] {
 	ctx = withBackground(ctx)
 	return func(yield func(RepoStatus) bool) {
 		type indexedStatus struct {
@@ -123,35 +167,35 @@ func StatusIter(ctx context.Context, opts StatusOptions) iter.Seq[RepoStatus] {
 }
 
 // getStatus gets the git status for a single repository.
-func getStatus(ctx context.Context, path, name string) RepoStatus {
+func getStatus(ctx core.Context, path, name string) RepoStatus {
 	ctx = withBackground(ctx)
 	status := RepoStatus{
 		Name: name,
 		Path: path,
 	}
 
-	if err := requireAbsolutePath("git.getStatus", path); err != nil {
-		status.Error = err
+	if r := requireAbsolutePath("git.getStatus", path); !r.OK {
+		status.Error = resultError(r)
 		return status
 	}
 
 	// Get current branch
-	branch, err := gitCommand(ctx, path, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		status.Error = err
+	branch := gitCommand(ctx, path, "rev-parse", "--abbrev-ref", "HEAD")
+	if !branch.OK {
+		status.Error = resultError(branch)
 		return status
 	}
-	status.Branch = trim(branch)
+	status.Branch = trim(branch.Value.(string))
 
 	// Get porcelain status
-	porcelain, err := gitCommand(ctx, path, "status", "--porcelain")
-	if err != nil {
-		status.Error = err
+	porcelain := gitCommand(ctx, path, "status", "--porcelain")
+	if !porcelain.OK {
+		status.Error = resultError(porcelain)
 		return status
 	}
 
 	// Parse status output
-	for _, line := range strings.Split(porcelain, "\n") {
+	for _, line := range core.Split(porcelain.Value.(string), "\n") {
 		if len(line) < 2 {
 			continue
 		}
@@ -175,14 +219,16 @@ func getStatus(ctx context.Context, path, name string) RepoStatus {
 	}
 
 	// Get ahead/behind counts
-	ahead, behind, err := getAheadBehind(ctx, path)
-	if err != nil {
+	counts := getAheadBehind(ctx, path)
+	if !counts.OK {
 		// We don't fail the whole status for missing upstream branches.
 		// We do surface other ahead/behind failures on the result.
-		status.Error = err
+		status.Error = resultError(counts)
+		return status
 	}
-	status.Ahead = ahead
-	status.Behind = behind
+	ab := counts.Value.(aheadBehind)
+	status.Ahead = ab.ahead
+	status.Behind = ab.behind
 
 	return status
 }
@@ -210,71 +256,76 @@ func isNoUpstreamError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(trim(err.Error()))
-	return strings.Contains(msg, "no upstream")
+	msg := core.Lower(trim(err.Error()))
+	return core.Contains(msg, "no upstream")
 }
 
-func requireAbsolutePath(op string, path string) error {
-	if filepath.IsAbs(path) {
-		return nil
+func requireAbsolutePath(op string, path string) core.Result {
+	if core.PathIsAbs(path) {
+		return core.Ok(path)
 	}
-	msg := fmt.Sprintf("path must be absolute: %s", path)
-	return &GitError{
+	msg := core.Sprintf("path must be absolute: %s", path)
+	return core.Fail(&GitError{
 		Args:   []string{op, path},
-		Err:    fmt.Errorf("%s: %s", op, msg),
+		Err:    core.E(op, msg, nil),
 		Stderr: msg,
-	}
+	})
+}
+
+type aheadBehind struct {
+	ahead  int
+	behind int
 }
 
 // getAheadBehind returns the number of commits ahead and behind upstream.
-func getAheadBehind(ctx context.Context, path string) (ahead, behind int, err error) {
+func getAheadBehind(ctx core.Context, path string) core.Result {
 	ctx = withBackground(ctx)
-	if err := requireAbsolutePath("git.getAheadBehind", path); err != nil {
-		return 0, 0, err
+	if r := requireAbsolutePath("git.getAheadBehind", path); !r.OK {
+		return r
 	}
 
+	ahead := 0
+	behind := 0
 	aheadArgs := []string{"rev-list", "--count", "@{u}..HEAD"}
-	aheadStr, err := gitCommand(ctx, path, aheadArgs...)
-	if err == nil {
-		ahead, err = parseGitCount("ahead", aheadStr)
-		if err != nil {
-			return 0, 0, gitParseError(aheadArgs, aheadStr, err)
+	aheadStr := gitCommand(ctx, path, aheadArgs...)
+	if aheadStr.OK {
+		parsed := parseGitCount("ahead", aheadStr.Value.(string))
+		if !parsed.OK {
+			return core.Fail(gitParseError(aheadArgs, aheadStr.Value.(string), resultError(parsed)))
 		}
-	} else if isNoUpstreamError(err) {
-		err = nil
-	}
-
-	if err != nil {
-		return 0, 0, err
+		ahead = parsed.Value.(int)
+	} else if !isNoUpstreamError(resultError(aheadStr)) {
+		return aheadStr
 	}
 
 	behindArgs := []string{"rev-list", "--count", "HEAD..@{u}"}
-	behindStr, err := gitCommand(ctx, path, behindArgs...)
-	if err == nil {
-		behind, err = parseGitCount("behind", behindStr)
-		if err != nil {
-			return 0, 0, gitParseError(behindArgs, behindStr, err)
+	behindStr := gitCommand(ctx, path, behindArgs...)
+	if behindStr.OK {
+		parsed := parseGitCount("behind", behindStr.Value.(string))
+		if !parsed.OK {
+			return core.Fail(gitParseError(behindArgs, behindStr.Value.(string), resultError(parsed)))
 		}
-	} else if isNoUpstreamError(err) {
-		err = nil
+		behind = parsed.Value.(int)
+	} else if !isNoUpstreamError(resultError(behindStr)) {
+		return behindStr
 	}
 
-	return ahead, behind, err
+	return core.Ok(aheadBehind{ahead: ahead, behind: behind})
 }
 
-func parseGitCount(label, value string) (int, error) {
-	n, err := strconv.ParseInt(trim(value), 10, 0)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse %s count: %w", label, err)
+func parseGitCount(label, value string) core.Result {
+	n := core.ParseInt(trim(value), 10, 0)
+	if !n.OK {
+		return core.Fail(core.E("git.parseGitCount", core.Sprintf("failed to parse %s count", label), resultError(n)))
 	}
-	return int(n), nil
+	return core.Ok(int(n.Value.(int64)))
 }
 
 func gitParseError(args []string, output string, err error) *GitError {
 	return &GitError{
-		Args:   slices.Clone(args),
+		Args:   core.SliceClone(args),
 		Err:    err,
-		Stderr: fmt.Sprintf("invalid git count output %q: %v", trim(output), err),
+		Stderr: core.Sprintf("invalid git count output %q: %v", trim(output), err),
 	}
 }
 
@@ -282,13 +333,13 @@ func gitParseError(args []string, output string, err error) *GitError {
 //
 // Example:
 //
-//	err := Push(ctx, "/home/user/Code/core/agent")
+//	r := Push(ctx, "/home/user/Code/core/agent")
 //
 // Uses interactive mode to support SSH passphrase prompts.
-func Push(ctx context.Context, path string) error {
+func Push(ctx core.Context, path string) core.Result {
 	ctx = withBackground(ctx)
-	if err := requireAbsolutePath("git.push", path); err != nil {
-		return err
+	if r := requireAbsolutePath("git.push", path); !r.OK {
+		return r
 	}
 	return gitInteractive(ctx, path, "push")
 }
@@ -297,13 +348,13 @@ func Push(ctx context.Context, path string) error {
 //
 // Example:
 //
-//	err := Pull(ctx, "/home/user/Code/core/agent")
+//	r := Pull(ctx, "/home/user/Code/core/agent")
 //
 // Uses interactive mode to support SSH passphrase prompts.
-func Pull(ctx context.Context, path string) error {
+func Pull(ctx core.Context, path string) core.Result {
 	ctx = withBackground(ctx)
-	if err := requireAbsolutePath("git.pull", path); err != nil {
-		return err
+	if r := requireAbsolutePath("git.pull", path); !r.OK {
+		return r
 	}
 	return gitInteractive(ctx, path, "pull", "--rebase")
 }
@@ -313,52 +364,37 @@ func IsNonFastForward(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "non-fast-forward") ||
-		strings.Contains(msg, "fetch first") ||
-		strings.Contains(msg, "tip of your current branch is behind")
+	msg := core.Lower(err.Error())
+	return core.Contains(msg, "non-fast-forward") ||
+		core.Contains(msg, "fetch first") ||
+		core.Contains(msg, "tip of your current branch is behind")
 }
 
 // gitInteractive runs a git command with terminal attached for user interaction.
-func gitInteractive(ctx context.Context, dir string, args ...string) error {
+func gitInteractive(ctx core.Context, dir string, args ...string) core.Result {
 	ctx = withBackground(ctx)
-	if err := requireAbsolutePath("git.interactive", dir); err != nil {
-		return err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return core.Fail(ctxErr)
+	}
+	if r := requireAbsolutePath("git.interactive", dir); !r.OK {
+		return r
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-
-	// Connect to terminal for SSH passphrase prompts
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-
-	// Capture stderr for error reporting while also showing it
-	stderr := &bytes.Buffer{}
-	cmd.Stderr = stderrTee{capture: stderr}
+	stderr := core.NewBuffer()
+	cmd := gitCmd(dir, args...)
+	cmd.Stdin = core.Stdin()
+	cmd.Stdout = core.Stdout()
+	cmd.Stderr = stderr
 
 	if err := cmd.Run(); err != nil {
-		return &GitError{
-			Args:   args,
+		return core.Fail(&GitError{
+			Args:   core.SliceClone(args),
 			Err:    err,
 			Stderr: stderr.String(),
-		}
+		})
 	}
 
-	return nil
-}
-
-type stderrTee struct {
-	capture interface {
-		Write([]byte) (int, error)
-	}
-}
-
-func (w stderrTee) Write(p []byte) (int, error) {
-	if _, err := os.Stderr.Write(p); err != nil {
-		return 0, err
-	}
-	return w.capture.Write(p)
+	return core.Ok(nil)
 }
 
 // PushResult represents the result of a push operation.
@@ -379,22 +415,14 @@ type PullResult struct {
 
 // PushMultiple pushes multiple repositories sequentially.
 // Sequential because SSH passphrase prompts need user interaction.
-func PushMultiple(ctx context.Context, paths []string, names map[string]string) ([]PushResult, error) {
-	results := slices.Collect(PushMultipleIter(withBackground(ctx), paths, names))
-	var lastErr error
-
-	for _, result := range results {
-		if result.Error != nil {
-			lastErr = result.Error
-		}
-	}
-
-	return results, lastErr
+func PushMultiple(ctx core.Context, paths []string, names map[string]string) core.Result {
+	results := collectSeq(PushMultipleIter(withBackground(ctx), paths, names))
+	return resultWithOK(results, lastPushError(results) == nil)
 }
 
 // PushMultipleIter pushes multiple repositories sequentially and yields each
 // per-repository result in input order.
-func PushMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PushResult] {
+func PushMultipleIter(ctx core.Context, paths []string, names map[string]string) iter.Seq[PushResult] {
 	ctx = withBackground(ctx)
 	return func(yield func(PushResult) bool) {
 		for _, path := range paths {
@@ -405,10 +433,10 @@ func PushMultipleIter(ctx context.Context, paths []string, names map[string]stri
 				Path: path,
 			}
 
-			if err := requireAbsolutePath("git.pushMultiple", path); err != nil {
-				result.Error = err
-			} else if err := Push(ctx, path); err != nil {
-				result.Error = err
+			if r := requireAbsolutePath("git.pushMultiple", path); !r.OK {
+				result.Error = resultError(r)
+			} else if r := Push(ctx, path); !r.OK {
+				result.Error = resultError(r)
 			} else {
 				result.Success = true
 			}
@@ -422,22 +450,14 @@ func PushMultipleIter(ctx context.Context, paths []string, names map[string]stri
 
 // PullMultiple pulls changes for multiple repositories sequentially.
 // Sequential because interactive terminal I/O needs a single active prompt.
-func PullMultiple(ctx context.Context, paths []string, names map[string]string) ([]PullResult, error) {
-	results := slices.Collect(PullMultipleIter(withBackground(ctx), paths, names))
-	var lastErr error
-
-	for _, result := range results {
-		if result.Error != nil {
-			lastErr = result.Error
-		}
-	}
-
-	return results, lastErr
+func PullMultiple(ctx core.Context, paths []string, names map[string]string) core.Result {
+	results := collectSeq(PullMultipleIter(withBackground(ctx), paths, names))
+	return resultWithOK(results, lastPullError(results) == nil)
 }
 
 // PullMultipleIter pulls changes for multiple repositories sequentially and yields
 // each per-repository result in input order.
-func PullMultipleIter(ctx context.Context, paths []string, names map[string]string) iter.Seq[PullResult] {
+func PullMultipleIter(ctx core.Context, paths []string, names map[string]string) iter.Seq[PullResult] {
 	ctx = withBackground(ctx)
 	return func(yield func(PullResult) bool) {
 		for _, path := range paths {
@@ -448,10 +468,10 @@ func PullMultipleIter(ctx context.Context, paths []string, names map[string]stri
 				Path: path,
 			}
 
-			if err := requireAbsolutePath("git.pullMultiple", path); err != nil {
-				result.Error = err
-			} else if err := Pull(ctx, path); err != nil {
-				result.Error = err
+			if r := requireAbsolutePath("git.pullMultiple", path); !r.OK {
+				result.Error = resultError(r)
+			} else if r := Pull(ctx, path); !r.OK {
+				result.Error = resultError(r)
 			} else {
 				result.Success = true
 			}
@@ -464,29 +484,30 @@ func PullMultipleIter(ctx context.Context, paths []string, names map[string]stri
 }
 
 // gitCommand runs a git command and returns stdout.
-func gitCommand(ctx context.Context, dir string, args ...string) (string, error) {
+func gitCommand(ctx core.Context, dir string, args ...string) core.Result {
 	ctx = withBackground(ctx)
-	if err := requireAbsolutePath("git.command", dir); err != nil {
-		return "", err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return core.Fail(ctxErr)
+	}
+	if r := requireAbsolutePath("git.command", dir); !r.OK {
+		return r
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
+	cmd := gitCmd(dir, args...)
+	stdout := core.NewBuffer()
+	stderr := core.NewBuffer()
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", &GitError{
-			Args:   args,
+		return core.Fail(&GitError{
+			Args:   core.SliceClone(args),
 			Err:    err,
 			Stderr: stderr.String(),
-		}
+		})
 	}
 
-	return stdout.String(), nil
+	return core.Ok(stdout.String())
 }
 
 // Compile-time interface checks.
@@ -501,23 +522,18 @@ type GitError struct {
 
 // Error returns a descriptive error message.
 func (e *GitError) Error() string {
-	cmd := "git " + strings.Join(e.Args, " ")
+	cmd := core.Concat("git ", core.Join(" ", e.Args...))
 	stderr := trim(e.Stderr)
 
 	if stderr != "" {
-		return fmt.Sprintf("git command %q failed: %s", cmd, stderr)
+		return core.Sprintf("git command %q failed: %s", cmd, stderr)
 	}
 	if e.Err != nil {
-		return fmt.Sprintf("git command %q failed: %v", cmd, e.Err)
+		return core.Sprintf("git command %q failed: %v", cmd, e.Err)
 	}
-	return fmt.Sprintf("git command %q failed", cmd)
-}
-
-// Unwrap returns the underlying error for error chain inspection.
-func (e *GitError) Unwrap() error {
-	return e.Err
+	return core.Sprintf("git command %q failed", cmd)
 }
 
 func trim(s string) string {
-	return strings.TrimSpace(s)
+	return core.Trim(s)
 }

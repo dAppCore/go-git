@@ -1,14 +1,6 @@
 package git
 
-import (
-	"context"
-	"errors"
-	"reflect"
-	"slices"
-	"testing"
-)
-
-func statusNames(statuses []RepoStatus) []string {
+func repoNames(statuses []RepoStatus) []string {
 	names := make([]string, 0, len(statuses))
 	for _, st := range statuses {
 		names = append(names, st.Name)
@@ -16,565 +8,291 @@ func statusNames(statuses []RepoStatus) []string {
 	return names
 }
 
-func TestService_Service_DirtyRepos_Good(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "clean"},
-			{Name: "dirty-modified", Modified: 2},
-			{Name: "dirty-untracked", Untracked: 1},
-			{Name: "dirty-staged", Staged: 3},
-			{Name: "ahead-only", Ahead: 4},
-			{Name: "behind-only", Behind: 5},
-		},
-	}
-
-	dirty := s.DirtyRepos()
-	if len(dirty) != 3 {
-		t.Fatalf("want %v, got %v", 3, len(dirty))
-	}
-
-	names := statusNames(dirty)
-	for _, name := range []string{"dirty-modified", "dirty-untracked", "dirty-staged"} {
-		if !slices.Contains(names, name) {
-			t.Fatalf("expected %v to contain %v", names, name)
-		}
-	}
+func testService(statuses ...RepoStatus) *Service {
+	return &Service{lastStatus: statuses}
 }
 
-func TestService_Service_DirtyRepos_Bad(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "dirty-error", Modified: 1, Error: errors.New("status failed")},
-			{Name: "invalid-negative", Modified: -1, Untracked: -1, Staged: -1},
-		},
-	}
+func TestService_NewService_Good(t *T) {
+	c := New()
+	opts := ServiceOptions{WorkDir: testTempDir(t)}
 
-	dirty := s.DirtyRepos()
-	if len(dirty) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(dirty))
-	}
+	r := NewService(opts)(c)
+
+	AssertTrue(t, r.OK)
+	svc := r.Value.(*Service)
+	AssertEqual(t, opts.WorkDir, svc.opts.WorkDir)
+	AssertEqual(t, c, svc.Core())
 }
 
-func TestService_Service_DirtyRepos_Ugly(t *testing.T) {
-	tests := []struct {
-		name string
-		svc  *Service
-	}{
-		{name: "nil status slice", svc: &Service{}},
-		{name: "empty status slice", svc: &Service{lastStatus: []RepoStatus{}}},
-		{name: "only clean repos", svc: &Service{lastStatus: []RepoStatus{{Name: "clean1"}, {Name: "clean2"}}}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dirty := tt.svc.DirtyRepos()
-			if len(dirty) != 0 {
-				t.Fatalf("want %v, got %v", 0, len(dirty))
-			}
-		})
-	}
-}
-
-func TestService_Service_AheadRepos_Good(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "up-to-date", Ahead: 0},
-			{Name: "ahead-by-one", Ahead: 1},
-			{Name: "ahead-by-five", Ahead: 5},
-			{Name: "behind-only", Behind: 3},
-		},
-	}
-
-	ahead := s.AheadRepos()
-	if len(ahead) != 2 {
-		t.Fatalf("want %v, got %v", 2, len(ahead))
-	}
-
-	names := statusNames(ahead)
-	for _, name := range []string{"ahead-by-one", "ahead-by-five"} {
-		if !slices.Contains(names, name) {
-			t.Fatalf("expected %v to contain %v", names, name)
-		}
-	}
-}
-
-func TestService_Service_AheadRepos_Bad(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "ahead-error", Ahead: 2, Error: errors.New("status failed")},
-			{Name: "invalid-negative", Ahead: -1},
-		},
-	}
-
-	ahead := s.AheadRepos()
-	if len(ahead) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(ahead))
-	}
-}
-
-func TestService_Service_AheadRepos_Ugly(t *testing.T) {
-	tests := []struct {
-		name string
-		svc  *Service
-	}{
-		{name: "nil status slice", svc: &Service{}},
-		{name: "empty status slice", svc: &Service{lastStatus: []RepoStatus{}}},
-		{name: "only synced repos", svc: &Service{lastStatus: []RepoStatus{{Name: "synced1"}, {Name: "synced2"}}}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ahead := tt.svc.AheadRepos()
-			if len(ahead) != 0 {
-				t.Fatalf("want %v, got %v", 0, len(ahead))
-			}
-		})
-	}
-}
-
-func TestService_Service_BehindRepos_Good(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "synced", Behind: 0},
-			{Name: "behind-by-one", Behind: 1},
-			{Name: "behind-by-five", Behind: 5},
-			{Name: "ahead-only", Ahead: 3},
-		},
-	}
-
-	behind := s.BehindRepos()
-	if len(behind) != 2 {
-		t.Fatalf("want %v, got %v", 2, len(behind))
-	}
-
-	names := statusNames(behind)
-	for _, name := range []string{"behind-by-one", "behind-by-five"} {
-		if !slices.Contains(names, name) {
-			t.Fatalf("expected %v to contain %v", names, name)
-		}
-	}
-}
-
-func TestService_Service_BehindRepos_Bad(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "behind-error", Behind: 2, Error: errors.New("status failed")},
-			{Name: "invalid-negative", Behind: -1},
-		},
-	}
-
-	behind := s.BehindRepos()
-	if len(behind) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(behind))
-	}
-}
-
-func TestService_Service_BehindRepos_Ugly(t *testing.T) {
-	tests := []struct {
-		name string
-		svc  *Service
-	}{
-		{name: "nil status slice", svc: &Service{}},
-		{name: "empty status slice", svc: &Service{lastStatus: []RepoStatus{}}},
-		{name: "only synced repos", svc: &Service{lastStatus: []RepoStatus{{Name: "synced1"}, {Name: "synced2"}}}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			behind := tt.svc.BehindRepos()
-			if len(behind) != 0 {
-				t.Fatalf("want %v, got %v", 0, len(behind))
-			}
-		})
-	}
-}
-
-func TestService_Iterators_Good(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "clean"},
-			{Name: "dirty", Modified: 1},
-			{Name: "ahead", Ahead: 2},
-			{Name: "behind", Behind: 3},
-		},
-	}
-
-	all := slices.Collect(s.All())
-	if len(all) != 4 {
-		t.Fatalf("want %v, got %v", 4, len(all))
-	}
-
-	dirty := slices.Collect(s.Dirty())
-	if len(dirty) != 1 || dirty[0].Name != "dirty" {
-		t.Fatalf("want dirty repo only, got %v", dirty)
-	}
-
-	ahead := slices.Collect(s.Ahead())
-	if len(ahead) != 1 || ahead[0].Name != "ahead" {
-		t.Fatalf("want ahead repo only, got %v", ahead)
-	}
-
-	behind := slices.Collect(s.Behind())
-	if len(behind) != 1 || behind[0].Name != "behind" {
-		t.Fatalf("want behind repo only, got %v", behind)
-	}
-}
-
-func TestService_Iterators_Bad(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "dirty-error", Modified: 1, Error: errors.New("status failed")},
-			{Name: "ahead-error", Ahead: 1, Error: errors.New("status failed")},
-			{Name: "behind-error", Behind: 1, Error: errors.New("status failed")},
-		},
-	}
-
-	if dirty := slices.Collect(s.Dirty()); len(dirty) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(dirty))
-	}
-	if ahead := slices.Collect(s.Ahead()); len(ahead) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(ahead))
-	}
-	if behind := slices.Collect(s.Behind()); len(behind) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(behind))
-	}
-
-	all := slices.Collect(s.All())
-	if len(all) != 3 {
-		t.Fatalf("All should keep errored repos: want %v, got %v", 3, len(all))
-	}
-}
-
-func TestService_Iterators_Ugly(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "dirty", Modified: 1},
-			{Name: "ahead", Ahead: 1},
-		},
-	}
-
-	allIter := s.All()
-	dirtyIter := s.Dirty()
-	s.lastStatus[0].Name = "mutated"
-	s.lastStatus[0].Modified = 0
-
-	all := slices.Collect(allIter)
-	if len(all) != 2 || all[0].Name != "dirty" {
-		t.Fatalf("iterator should use a snapshot, got %v", all)
-	}
-
-	dirty := slices.Collect(dirtyIter)
-	if len(dirty) != 1 || dirty[0].Name != "dirty" {
-		t.Fatalf("filtered iterator should use a snapshot, got %v", dirty)
-	}
-}
-
-func TestService_Service_All_Good(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "clean"}, {Name: "dirty", Modified: 1}}}
-
-	all := slices.Collect(s.All())
-	if len(all) != 2 {
-		t.Fatalf("want %v, got %v", 2, len(all))
-	}
-	if all[0].Name != "clean" || all[1].Name != "dirty" {
-		t.Fatalf("unexpected statuses: %v", all)
-	}
-}
-
-func TestService_Service_All_Bad(t *testing.T) {
-	s := &Service{}
-
-	all := slices.Collect(s.All())
-	if len(all) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(all))
-	}
-}
-
-func TestService_Service_All_Ugly(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "before"}}}
-	iter := s.All()
-	s.lastStatus[0].Name = "after"
-
-	all := slices.Collect(iter)
-	if len(all) != 1 || all[0].Name != "before" {
-		t.Fatalf("iterator should use a snapshot, got %v", all)
-	}
-}
-
-func TestService_Service_Dirty_Good(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "clean"}, {Name: "dirty", Modified: 1}}}
-
-	dirty := slices.Collect(s.Dirty())
-	if len(dirty) != 1 {
-		t.Fatalf("want %v, got %v", 1, len(dirty))
-	}
-	if dirty[0].Name != "dirty" {
-		t.Fatalf("want %v, got %v", "dirty", dirty[0].Name)
-	}
-}
-
-func TestService_Service_Dirty_Bad(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "errored", Modified: 1, Error: errors.New("status failed")}}}
-
-	dirty := slices.Collect(s.Dirty())
-	if len(dirty) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(dirty))
-	}
-}
-
-func TestService_Service_Dirty_Ugly(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "dirty", Modified: 1}}}
-	iter := s.Dirty()
-	s.lastStatus[0].Modified = 0
-
-	dirty := slices.Collect(iter)
-	if len(dirty) != 1 || dirty[0].Name != "dirty" {
-		t.Fatalf("iterator should use a snapshot, got %v", dirty)
-	}
-}
-
-func TestService_Service_Ahead_Good(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "synced"}, {Name: "ahead", Ahead: 1}}}
-
-	ahead := slices.Collect(s.Ahead())
-	if len(ahead) != 1 {
-		t.Fatalf("want %v, got %v", 1, len(ahead))
-	}
-	if ahead[0].Name != "ahead" {
-		t.Fatalf("want %v, got %v", "ahead", ahead[0].Name)
-	}
-}
-
-func TestService_Service_Ahead_Bad(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "errored", Ahead: 1, Error: errors.New("status failed")}}}
-
-	ahead := slices.Collect(s.Ahead())
-	if len(ahead) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(ahead))
-	}
-}
-
-func TestService_Service_Ahead_Ugly(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "ahead", Ahead: 1}}}
-	iter := s.Ahead()
-	s.lastStatus[0].Ahead = 0
-
-	ahead := slices.Collect(iter)
-	if len(ahead) != 1 || ahead[0].Name != "ahead" {
-		t.Fatalf("iterator should use a snapshot, got %v", ahead)
-	}
-}
-
-func TestService_Service_Behind_Good(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "synced"}, {Name: "behind", Behind: 1}}}
-
-	behind := slices.Collect(s.Behind())
-	if len(behind) != 1 {
-		t.Fatalf("want %v, got %v", 1, len(behind))
-	}
-	if behind[0].Name != "behind" {
-		t.Fatalf("want %v, got %v", "behind", behind[0].Name)
-	}
-}
-
-func TestService_Service_Behind_Bad(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "errored", Behind: 1, Error: errors.New("status failed")}}}
-
-	behind := slices.Collect(s.Behind())
-	if len(behind) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(behind))
-	}
-}
-
-func TestService_Service_Behind_Ugly(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "behind", Behind: 1}}}
-	iter := s.Behind()
-	s.lastStatus[0].Behind = 0
-
-	behind := slices.Collect(iter)
-	if len(behind) != 1 || behind[0].Name != "behind" {
-		t.Fatalf("iterator should use a snapshot, got %v", behind)
-	}
-}
-
-func TestService_Service_Status_Good(t *testing.T) {
-	expected := []RepoStatus{
-		{Name: "repo1", Branch: "main"},
-		{Name: "repo2", Branch: "develop"},
-	}
-	s := &Service{lastStatus: expected}
-
-	if got := s.Status(); !reflect.DeepEqual(expected, got) {
-		t.Fatalf("want %v, got %v", expected, got)
-	}
-}
-
-func TestService_Service_Status_Bad(t *testing.T) {
-	s := &Service{lastStatus: []RepoStatus{{Name: "repo1", Branch: "main"}}}
-
-	statuses := s.Status()
-	statuses[0].Name = "mutated"
-
-	if got := s.lastStatus[0].Name; got != "repo1" {
-		t.Fatalf("Status should return a clone: want %v, got %v", "repo1", got)
-	}
-}
-
-func TestService_Service_Status_Ugly(t *testing.T) {
-	s := &Service{}
-	if got := s.Status(); got != nil {
-		t.Fatalf("expected nil, got %v", got)
-	}
-}
-
-func TestService_QueryStatus_Good(t *testing.T) {
-	q := QueryStatus{
-		Paths: []string{"/path/a", "/path/b"},
-		Names: map[string]string{"/path/a": "repo-a"},
-	}
-
-	opts := StatusOptions(q)
-	if !slices.Equal(q.Paths, opts.Paths) {
-		t.Fatalf("want %v, got %v", q.Paths, opts.Paths)
-	}
-	if !reflect.DeepEqual(q.Names, opts.Names) {
-		t.Fatalf("want %v, got %v", q.Names, opts.Names)
-	}
-}
-
-func TestService_QueryStatus_Bad(t *testing.T) {
-	var q QueryStatus
-
-	opts := StatusOptions(q)
-	if opts.Paths != nil {
-		t.Fatalf("expected nil paths, got %v", opts.Paths)
-	}
-	if opts.Names != nil {
-		t.Fatalf("expected nil names, got %v", opts.Names)
-	}
-}
-
-func TestService_QueryStatus_Ugly(t *testing.T) {
-	q := QueryStatus{
-		Paths: []string{},
-		Names: map[string]string{},
-	}
-
-	opts := StatusOptions(q)
-	if opts.Paths == nil {
-		t.Fatal("expected empty but non-nil paths")
-	}
-	if opts.Names == nil {
-		t.Fatal("expected empty but non-nil names")
-	}
-}
-
-func TestService_QueryBehindRepos_Good(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "synced"},
-			{Name: "behind", Behind: 2},
-			{Name: "ahead", Ahead: 2},
-		},
-	}
-
-	behind := s.BehindRepos()
-	if len(behind) != 1 {
-		t.Fatalf("want %v, got %v", 1, len(behind))
-	}
-	if "behind" != behind[0].Name {
-		t.Fatalf("want %v, got %v", "behind", behind[0].Name)
-	}
-}
-
-func TestService_QueryBehindRepos_Bad(t *testing.T) {
-	s := &Service{
-		lastStatus: []RepoStatus{
-			{Name: "behind-error", Behind: 1, Error: errors.New("status failed")},
-			{Name: "behind-negative", Behind: -1},
-		},
-	}
-
-	if behind := s.BehindRepos(); len(behind) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(behind))
-	}
-}
-
-func TestService_QueryBehindRepos_Ugly(t *testing.T) {
-	s := &Service{}
-	if behind := s.BehindRepos(); len(behind) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(behind))
-	}
-}
-
-func TestService_TaskPullMultiple_Good(t *testing.T) {
-	s := &Service{}
-
-	result := s.runPullMultiple(context.Background(), []string{}, nil)
-	if !result.OK {
-		t.Fatalf("expected true, got %v", result.Value)
-	}
-	pulls, ok := result.Value.([]PullResult)
-	if !ok {
-		t.Fatalf("expected []PullResult, got %T", result.Value)
-	}
-	if len(pulls) != 0 {
-		t.Fatalf("want %v, got %v", 0, len(pulls))
-	}
-}
-
-func TestService_TaskPullMultiple_Bad(t *testing.T) {
-	s := &Service{}
-
-	result := s.runPullMultiple(context.Background(), []string{"relative/path"}, nil)
-	if result.OK {
-		t.Fatal("expected false")
-	}
-	err, ok := result.Value.(error)
-	if !ok {
-		t.Fatalf("expected error, got %T", result.Value)
-	}
-	var gitErr *GitError
-	if !errors.As(err, &gitErr) {
-		t.Fatalf("expected *GitError, got %T", err)
-	}
-	if !slices.Contains(gitErr.Args, "path=relative/path") {
-		t.Fatalf("expected args %v to contain relative path", gitErr.Args)
-	}
-}
-
-func TestService_TaskPullMultiple_Ugly(t *testing.T) {
-	task := TaskPullMultiple{
-		Paths: []string{},
-		Names: map[string]string{},
-	}
-
-	if task.Paths == nil {
-		t.Fatal("expected empty but non-nil paths")
-	}
-	if task.Names == nil {
-		t.Fatal("expected empty but non-nil names")
-	}
-}
-
-func TestService_ServiceOptions_Good(t *testing.T) {
-	workDir := "/tmp/test-repos"
-	opts := ServiceOptions{WorkDir: workDir}
-	if workDir != opts.WorkDir {
-		t.Fatalf("want %v, got %v", workDir, opts.WorkDir)
-	}
-}
-
-func TestService_ServiceOptions_Bad(t *testing.T) {
+func TestService_NewService_Bad(t *T) {
+	c := New()
 	opts := ServiceOptions{WorkDir: "relative/workdir"}
-	if opts.WorkDir != "relative/workdir" {
-		t.Fatalf("want %v, got %v", "relative/workdir", opts.WorkDir)
-	}
+
+	r := NewService(opts)(c)
+
+	AssertTrue(t, r.OK)
+	svc := r.Value.(*Service)
+	AssertEqual(t, "relative/workdir", svc.opts.WorkDir)
 }
 
-func TestService_ServiceOptions_Ugly(t *testing.T) {
-	var opts ServiceOptions
-	if opts.WorkDir != "" {
-		t.Fatalf("want empty WorkDir, got %v", opts.WorkDir)
-	}
+func TestService_NewService_Ugly(t *T) {
+	r := NewService(ServiceOptions{})(nil)
+
+	AssertTrue(t, r.OK)
+	svc := r.Value.(*Service)
+	AssertNil(t, svc.Core())
+	AssertEqual(t, "", svc.opts.WorkDir)
+}
+
+func TestService_Service_OnStartup_Good(t *T) {
+	c := New()
+	svc := &Service{ServiceRuntime: NewServiceRuntime(c, ServiceOptions{})}
+
+	r := svc.OnStartup(Background())
+
+	AssertTrue(t, r.OK)
+	AssertTrue(t, c.Action(actionGitPush).Exists())
+	AssertTrue(t, c.Action(actionGitPull).Exists())
+}
+
+func TestService_Service_OnStartup_Bad(t *T) {
+	c := New()
+	svc := &Service{ServiceRuntime: NewServiceRuntime(c, ServiceOptions{WorkDir: "relative/workdir"})}
+
+	r := svc.OnStartup(Background())
+
+	AssertTrue(t, r.OK)
+	result := c.Action(actionGitPush).Run(Background(), NewOptions(Option{Key: actionPathKey, Value: "relative/repo"}))
+	AssertFalse(t, result.OK)
+	AssertContains(t, result.Error(), "path must be absolute")
+}
+
+func TestService_Service_OnStartup_Ugly(t *T) {
+	c := New()
+	svc := &Service{ServiceRuntime: NewServiceRuntime(c, ServiceOptions{})}
+
+	first := svc.OnStartup(Background())
+	second := svc.OnStartup(Background())
+
+	AssertTrue(t, first.OK)
+	AssertTrue(t, second.OK)
+	AssertTrue(t, c.Action(actionGitPullMultiple).Exists())
+}
+
+func TestService_Service_Status_Good(t *T) {
+	expected := []RepoStatus{{Name: "repo1", Branch: "main"}, {Name: "repo2", Branch: "develop"}}
+	svc := testService(expected...)
+
+	got := svc.Status()
+
+	AssertEqual(t, expected, got)
+}
+
+func TestService_Service_Status_Bad(t *T) {
+	svc := testService(RepoStatus{Name: "repo1"})
+
+	got := svc.Status()
+	got[0].Name = "mutated"
+
+	AssertEqual(t, "repo1", svc.lastStatus[0].Name)
+}
+
+func TestService_Service_Status_Ugly(t *T) {
+	svc := testService()
+	statuses := svc.Status()
+	AssertNil(t, statuses)
+	AssertLen(t, statuses, 0)
+}
+
+func TestService_Service_All_Good(t *T) {
+	svc := testService(RepoStatus{Name: "clean"}, RepoStatus{Name: "dirty", Modified: 1})
+
+	all := collectSeq(svc.All())
+
+	AssertLen(t, all, 2)
+	AssertEqual(t, []string{"clean", "dirty"}, repoNames(all))
+}
+
+func TestService_Service_All_Bad(t *T) {
+	svc := testService()
+
+	all := collectSeq(svc.All())
+
+	AssertLen(t, all, 0)
+}
+
+func TestService_Service_All_Ugly(t *T) {
+	svc := testService(RepoStatus{Name: "before"})
+	iter := svc.All()
+	svc.lastStatus[0].Name = "after"
+
+	all := collectSeq(iter)
+
+	AssertLen(t, all, 1)
+	AssertEqual(t, "before", all[0].Name)
+}
+
+func TestService_Service_Dirty_Good(t *T) {
+	svc := testService(RepoStatus{Name: "clean"}, RepoStatus{Name: "dirty", Modified: 1})
+
+	dirty := collectSeq(svc.Dirty())
+
+	AssertLen(t, dirty, 1)
+	AssertEqual(t, "dirty", dirty[0].Name)
+}
+
+func TestService_Service_Dirty_Bad(t *T) {
+	svc := testService(RepoStatus{Name: "errored", Modified: 1, Error: NewError("status failed")})
+
+	dirty := collectSeq(svc.Dirty())
+
+	AssertLen(t, dirty, 0)
+}
+
+func TestService_Service_Dirty_Ugly(t *T) {
+	svc := testService(RepoStatus{Name: "dirty", Modified: 1})
+	iter := svc.Dirty()
+	svc.lastStatus[0].Modified = 0
+
+	dirty := collectSeq(iter)
+
+	AssertLen(t, dirty, 1)
+	AssertEqual(t, "dirty", dirty[0].Name)
+}
+
+func TestService_Service_Ahead_Good(t *T) {
+	svc := testService(RepoStatus{Name: "synced"}, RepoStatus{Name: "ahead", Ahead: 1})
+
+	ahead := collectSeq(svc.Ahead())
+
+	AssertLen(t, ahead, 1)
+	AssertEqual(t, "ahead", ahead[0].Name)
+}
+
+func TestService_Service_Ahead_Bad(t *T) {
+	svc := testService(RepoStatus{Name: "errored", Ahead: 1, Error: NewError("status failed")})
+
+	ahead := collectSeq(svc.Ahead())
+
+	AssertLen(t, ahead, 0)
+}
+
+func TestService_Service_Ahead_Ugly(t *T) {
+	svc := testService(RepoStatus{Name: "ahead", Ahead: 1})
+	iter := svc.Ahead()
+	svc.lastStatus[0].Ahead = 0
+
+	ahead := collectSeq(iter)
+
+	AssertLen(t, ahead, 1)
+	AssertEqual(t, "ahead", ahead[0].Name)
+}
+
+func TestService_Service_Behind_Good(t *T) {
+	svc := testService(RepoStatus{Name: "synced"}, RepoStatus{Name: "behind", Behind: 1})
+
+	behind := collectSeq(svc.Behind())
+
+	AssertLen(t, behind, 1)
+	AssertEqual(t, "behind", behind[0].Name)
+}
+
+func TestService_Service_Behind_Bad(t *T) {
+	svc := testService(RepoStatus{Name: "errored", Behind: 1, Error: NewError("status failed")})
+
+	behind := collectSeq(svc.Behind())
+
+	AssertLen(t, behind, 0)
+}
+
+func TestService_Service_Behind_Ugly(t *T) {
+	svc := testService(RepoStatus{Name: "behind", Behind: 1})
+	iter := svc.Behind()
+	svc.lastStatus[0].Behind = 0
+
+	behind := collectSeq(iter)
+
+	AssertLen(t, behind, 1)
+	AssertEqual(t, "behind", behind[0].Name)
+}
+
+func TestService_Service_DirtyRepos_Good(t *T) {
+	svc := testService(
+		RepoStatus{Name: "clean"},
+		RepoStatus{Name: "dirty-modified", Modified: 2},
+		RepoStatus{Name: "dirty-untracked", Untracked: 1},
+		RepoStatus{Name: "dirty-staged", Staged: 3},
+	)
+
+	dirty := svc.DirtyRepos()
+
+	AssertLen(t, dirty, 3)
+	AssertContains(t, repoNames(dirty), "dirty-modified")
+	AssertContains(t, repoNames(dirty), "dirty-untracked")
+	AssertContains(t, repoNames(dirty), "dirty-staged")
+}
+
+func TestService_Service_DirtyRepos_Bad(t *T) {
+	svc := testService(RepoStatus{Name: "dirty-error", Modified: 1, Error: NewError("status failed")})
+
+	dirty := svc.DirtyRepos()
+
+	AssertLen(t, dirty, 0)
+}
+
+func TestService_Service_DirtyRepos_Ugly(t *T) {
+	svc := testService()
+	dirty := svc.DirtyRepos()
+	AssertLen(t, dirty, 0)
+	AssertNil(t, dirty)
+}
+
+func TestService_Service_AheadRepos_Good(t *T) {
+	svc := testService(RepoStatus{Name: "synced"}, RepoStatus{Name: "ahead-one", Ahead: 1}, RepoStatus{Name: "ahead-two", Ahead: 2})
+
+	ahead := svc.AheadRepos()
+
+	AssertLen(t, ahead, 2)
+	AssertContains(t, repoNames(ahead), "ahead-one")
+	AssertContains(t, repoNames(ahead), "ahead-two")
+}
+
+func TestService_Service_AheadRepos_Bad(t *T) {
+	svc := testService(RepoStatus{Name: "ahead-error", Ahead: 1, Error: NewError("status failed")})
+
+	ahead := svc.AheadRepos()
+
+	AssertLen(t, ahead, 0)
+}
+
+func TestService_Service_AheadRepos_Ugly(t *T) {
+	svc := testService()
+	ahead := svc.AheadRepos()
+	AssertLen(t, ahead, 0)
+	AssertNil(t, ahead)
+}
+
+func TestService_Service_BehindRepos_Good(t *T) {
+	svc := testService(RepoStatus{Name: "synced"}, RepoStatus{Name: "behind-one", Behind: 1}, RepoStatus{Name: "behind-two", Behind: 2})
+
+	behind := svc.BehindRepos()
+
+	AssertLen(t, behind, 2)
+	AssertContains(t, repoNames(behind), "behind-one")
+	AssertContains(t, repoNames(behind), "behind-two")
+}
+
+func TestService_Service_BehindRepos_Bad(t *T) {
+	svc := testService(RepoStatus{Name: "behind-error", Behind: 1, Error: NewError("status failed")})
+
+	behind := svc.BehindRepos()
+
+	AssertLen(t, behind, 0)
+}
+
+func TestService_Service_BehindRepos_Ugly(t *T) {
+	svc := testService()
+	behind := svc.BehindRepos()
+	AssertLen(t, behind, 0)
+	AssertNil(t, behind)
 }
