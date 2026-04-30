@@ -30,6 +30,12 @@ var (
 	WriteFile         = core.WriteFile
 )
 
+const (
+	relativeRepoPath   = "relative/repo"
+	testFileName       = "file.txt"
+	pathMustBeAbsolute = "path must be absolute"
+)
+
 func testTempDir(t *T) string {
 	t.Helper()
 	r := MkdirTemp("", "go-git-test-")
@@ -101,7 +107,7 @@ func initRemoteRepo(t *T) (string, string) {
 	t.Helper()
 	remote := initBareRemote(t)
 	clone := cloneTestRepo(t, remote)
-	commitTestFile(t, clone, "file.txt", "v1\n", "initial")
+	commitTestFile(t, clone, testFileName, "v1\n", "initial")
 	runTestGit(t, clone, "push", "-u", "origin", "HEAD")
 	return remote, clone
 }
@@ -109,7 +115,7 @@ func initRemoteRepo(t *T) (string, string) {
 func initPushableRepo(t *T) string {
 	t.Helper()
 	_, clone := initRemoteRepo(t)
-	commitTestFile(t, clone, "file.txt", "v2\n", "local commit")
+	commitTestFile(t, clone, testFileName, "v2\n", "local commit")
 	return clone
 }
 
@@ -117,7 +123,7 @@ func initPullableRepo(t *T) string {
 	t.Helper()
 	remote, upstream := initRemoteRepo(t)
 	clone := cloneTestRepo(t, remote)
-	commitTestFile(t, upstream, "file.txt", "v2\n", "remote commit")
+	commitTestFile(t, upstream, testFileName, "v2\n", "remote commit")
 	runTestGit(t, upstream, "push", "origin", "HEAD")
 	return clone
 }
@@ -196,10 +202,10 @@ func TestGit_Status_Good(t *T) {
 }
 
 func TestGit_Status_Bad(t *T) {
-	statuses := Status(Background(), StatusOptions{Paths: []string{"relative/repo"}})
+	statuses := Status(Background(), StatusOptions{Paths: []string{relativeRepoPath}})
 	AssertLen(t, statuses, 1)
 	AssertNotNil(t, statuses[0].Error)
-	AssertContains(t, statuses[0].Error.Error(), "path must be absolute")
+	AssertContains(t, statuses[0].Error.Error(), pathMustBeAbsolute)
 }
 
 func TestGit_Status_Ugly(t *T) {
@@ -225,10 +231,10 @@ func TestGit_StatusIter_Good(t *T) {
 }
 
 func TestGit_StatusIter_Bad(t *T) {
-	statuses := collectSeq(StatusIter(Background(), StatusOptions{Paths: []string{"relative/repo"}}))
+	statuses := collectSeq(StatusIter(Background(), StatusOptions{Paths: []string{relativeRepoPath}}))
 	AssertLen(t, statuses, 1)
 	AssertNotNil(t, statuses[0].Error)
-	AssertContains(t, statuses[0].Error.Error(), "path must be absolute")
+	AssertContains(t, statuses[0].Error.Error(), pathMustBeAbsolute)
 }
 
 func TestGit_StatusIter_Ugly(t *T) {
@@ -254,9 +260,9 @@ func TestGit_Push_Good(t *T) {
 }
 
 func TestGit_Push_Bad(t *T) {
-	r := Push(Background(), "relative/repo")
+	r := Push(Background(), relativeRepoPath)
 	AssertFalse(t, r.OK)
-	AssertContains(t, r.Error(), "path must be absolute")
+	AssertContains(t, r.Error(), pathMustBeAbsolute)
 }
 
 func TestGit_Push_Ugly(t *T) {
@@ -277,9 +283,9 @@ func TestGit_Pull_Good(t *T) {
 }
 
 func TestGit_Pull_Bad(t *T) {
-	r := Pull(Background(), "relative/repo")
+	r := Pull(Background(), relativeRepoPath)
 	AssertFalse(t, r.OK)
-	AssertContains(t, r.Error(), "path must be absolute")
+	AssertContains(t, r.Error(), pathMustBeAbsolute)
 }
 
 func TestGit_Pull_Ugly(t *T) {
@@ -322,12 +328,12 @@ func TestGit_PushMultiple_Good(t *T) {
 }
 
 func TestGit_PushMultiple_Bad(t *T) {
-	r := PushMultiple(Background(), []string{"relative/repo"}, nil)
+	r := PushMultiple(Background(), []string{relativeRepoPath}, nil)
 	AssertFalse(t, r.OK)
 	results := r.Value.([]PushResult)
 	AssertLen(t, results, 1)
 	AssertNotNil(t, results[0].Error)
-	AssertContains(t, results[0].Error.Error(), "path must be absolute")
+	AssertContains(t, results[0].Error.Error(), pathMustBeAbsolute)
 }
 
 func TestGit_PushMultiple_Ugly(t *T) {
@@ -346,7 +352,7 @@ func TestGit_PushMultipleIter_Good(t *T) {
 }
 
 func TestGit_PushMultipleIter_Bad(t *T) {
-	results := collectSeq(PushMultipleIter(Background(), []string{"relative/repo"}, nil))
+	results := collectSeq(PushMultipleIter(Background(), []string{relativeRepoPath}, nil))
 
 	AssertLen(t, results, 1)
 	AssertFalse(t, results[0].Success)
@@ -356,12 +362,12 @@ func TestGit_PushMultipleIter_Bad(t *T) {
 func TestGit_PushMultipleIter_Ugly(t *T) {
 	dir := initPushableRepo(t)
 	var results []PushResult
-	PushMultipleIter(Background(), []string{"relative/repo", dir}, nil)(func(result PushResult) bool {
+	PushMultipleIter(Background(), []string{relativeRepoPath, dir}, nil)(func(result PushResult) bool {
 		results = append(results, result)
 		return false
 	})
 	AssertLen(t, results, 1)
-	AssertEqual(t, "relative/repo", results[0].Path)
+	AssertEqual(t, relativeRepoPath, results[0].Path)
 }
 
 func TestGit_PullMultiple_Good(t *T) {
@@ -380,12 +386,12 @@ func TestGit_PullMultiple_Good(t *T) {
 }
 
 func TestGit_PullMultiple_Bad(t *T) {
-	r := PullMultiple(Background(), []string{"relative/repo"}, nil)
+	r := PullMultiple(Background(), []string{relativeRepoPath}, nil)
 	AssertFalse(t, r.OK)
 	results := r.Value.([]PullResult)
 	AssertLen(t, results, 1)
 	AssertNotNil(t, results[0].Error)
-	AssertContains(t, results[0].Error.Error(), "path must be absolute")
+	AssertContains(t, results[0].Error.Error(), pathMustBeAbsolute)
 }
 
 func TestGit_PullMultiple_Ugly(t *T) {
@@ -404,7 +410,7 @@ func TestGit_PullMultipleIter_Good(t *T) {
 }
 
 func TestGit_PullMultipleIter_Bad(t *T) {
-	results := collectSeq(PullMultipleIter(Background(), []string{"relative/repo"}, nil))
+	results := collectSeq(PullMultipleIter(Background(), []string{relativeRepoPath}, nil))
 
 	AssertLen(t, results, 1)
 	AssertFalse(t, results[0].Success)
@@ -414,12 +420,12 @@ func TestGit_PullMultipleIter_Bad(t *T) {
 func TestGit_PullMultipleIter_Ugly(t *T) {
 	dir := initPullableRepo(t)
 	var results []PullResult
-	PullMultipleIter(Background(), []string{"relative/repo", dir}, nil)(func(result PullResult) bool {
+	PullMultipleIter(Background(), []string{relativeRepoPath, dir}, nil)(func(result PullResult) bool {
 		results = append(results, result)
 		return false
 	})
 	AssertLen(t, results, 1)
-	AssertEqual(t, "relative/repo", results[0].Path)
+	AssertEqual(t, relativeRepoPath, results[0].Path)
 }
 
 func TestGit_GitError_Error_Good(t *T) {

@@ -71,6 +71,7 @@ const (
 	actionGitPullMultiple = "git.pull-multiple"
 	actionPathKey         = "p" + "ath"
 	statusLockName        = "git.status"
+	pathValidationFailed  = "path validation failed"
 )
 
 // NewService creates a git service factory.
@@ -142,7 +143,7 @@ func (s *Service) handleQuery(c *core.Core, q core.Query) core.Result {
 	case QueryStatus:
 		paths := s.validatePaths(m.Paths)
 		if !paths.OK {
-			return c.LogError(resultError(paths), "git.handleQuery", "path validation failed")
+			return c.LogError(resultError(paths), "git.handleQuery", pathValidationFailed)
 		}
 		resolved := paths.Value.([]string)
 
@@ -192,11 +193,11 @@ func (s *Service) handleTask(c *core.Core, t any) core.Result {
 func (s *Service) runPush(ctx core.Context, path string) core.Result {
 	resolved := s.validatePath(path)
 	if !resolved.OK {
-		return s.logError(resultError(resolved), "git.push", "path validation failed")
+		return s.logError(resultError(resolved), actionGitPush, pathValidationFailed)
 	}
 	r := Push(ctx, resolved.Value.(string))
 	if !r.OK {
-		return s.logError(resultError(r), "git.push", "push failed")
+		return s.logError(resultError(r), actionGitPush, "push failed")
 	}
 	return core.Ok(nil)
 }
@@ -204,11 +205,11 @@ func (s *Service) runPush(ctx core.Context, path string) core.Result {
 func (s *Service) runPull(ctx core.Context, path string) core.Result {
 	resolved := s.validatePath(path)
 	if !resolved.OK {
-		return s.logError(resultError(resolved), "git.pull", "path validation failed")
+		return s.logError(resultError(resolved), actionGitPull, pathValidationFailed)
 	}
 	r := Pull(ctx, resolved.Value.(string))
 	if !r.OK {
-		return s.logError(resultError(r), "git.pull", "pull failed")
+		return s.logError(resultError(r), actionGitPull, "pull failed")
 	}
 	return core.Ok(nil)
 }
@@ -216,14 +217,14 @@ func (s *Service) runPull(ctx core.Context, path string) core.Result {
 func (s *Service) runPushMultiple(ctx core.Context, paths []string, names map[string]string) core.Result {
 	resolvedPaths := s.validatePaths(paths)
 	if !resolvedPaths.OK {
-		return s.logError(resultError(resolvedPaths), "git.push-multiple", "path validation failed")
+		return s.logError(resultError(resolvedPaths), actionGitPushMultiple, pathValidationFailed)
 	}
 	resolved := resolvedPaths.Value.([]string)
 	results := PushMultiple(ctx, resolved, resolvedNames(paths, resolved, names))
 	if !results.OK {
 		pushResults := results.Value.([]PushResult)
 		if last := lastPushError(pushResults); last != nil {
-			_ = s.logError(last, "git.push-multiple", "push multiple had failures")
+			_ = s.logError(last, actionGitPushMultiple, "push multiple had failures")
 		}
 	}
 	return results
@@ -232,14 +233,14 @@ func (s *Service) runPushMultiple(ctx core.Context, paths []string, names map[st
 func (s *Service) runPullMultiple(ctx core.Context, paths []string, names map[string]string) core.Result {
 	resolvedPaths := s.validatePaths(paths)
 	if !resolvedPaths.OK {
-		return s.logError(resultError(resolvedPaths), "git.pull-multiple", "path validation failed")
+		return s.logError(resultError(resolvedPaths), actionGitPullMultiple, pathValidationFailed)
 	}
 	resolved := resolvedPaths.Value.([]string)
 	results := PullMultiple(ctx, resolved, resolvedNames(paths, resolved, names))
 	if !results.OK {
 		pullResults := results.Value.([]PullResult)
 		if last := lastPullError(pullResults); last != nil {
-			_ = s.logError(last, "git.pull-multiple", "pull multiple had failures")
+			_ = s.logError(last, actionGitPullMultiple, "pull multiple had failures")
 		}
 	}
 	return results

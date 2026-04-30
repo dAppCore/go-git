@@ -19,7 +19,7 @@ func ExampleRepoStatus_HasUnpulled() {
 }
 
 func ExampleStatus() {
-	statuses := Status(Background(), StatusOptions{Paths: []string{"relative/repo"}})
+	statuses := Status(Background(), StatusOptions{Paths: []string{relativeRepoPath}})
 	Println(len(statuses))
 	Println(statuses[0].Error != nil)
 	// Output:
@@ -29,7 +29,7 @@ func ExampleStatus() {
 
 func ExampleStatusIter() {
 	count := 0
-	for status := range StatusIter(Background(), StatusOptions{Paths: []string{"relative/repo"}}) {
+	for status := range StatusIter(Background(), StatusOptions{Paths: []string{relativeRepoPath}}) {
 		if status.Error != nil {
 			count++
 		}
@@ -39,13 +39,13 @@ func ExampleStatusIter() {
 }
 
 func ExamplePush() {
-	r := Push(Background(), "relative/repo")
+	r := Push(Background(), relativeRepoPath)
 	Println(r.OK)
 	// Output: false
 }
 
 func ExamplePull() {
-	r := Pull(Background(), "relative/repo")
+	r := Pull(Background(), relativeRepoPath)
 	Println(r.OK)
 	// Output: false
 }
@@ -56,7 +56,7 @@ func ExampleIsNonFastForward() {
 }
 
 func ExamplePushMultiple() {
-	r := PushMultiple(Background(), []string{"relative/repo"}, nil)
+	r := PushMultiple(Background(), []string{relativeRepoPath}, nil)
 	Println(r.OK)
 	Println(len(r.Value.([]PushResult)))
 	// Output:
@@ -65,7 +65,7 @@ func ExamplePushMultiple() {
 }
 
 func ExamplePushMultipleIter() {
-	results := collectSeq(PushMultipleIter(Background(), []string{"relative/repo"}, nil))
+	results := collectSeq(PushMultipleIter(Background(), []string{relativeRepoPath}, nil))
 	Println(len(results))
 	Println(results[0].Success)
 	// Output:
@@ -74,7 +74,7 @@ func ExamplePushMultipleIter() {
 }
 
 func ExamplePullMultiple() {
-	r := PullMultiple(Background(), []string{"relative/repo"}, nil)
+	r := PullMultiple(Background(), []string{relativeRepoPath}, nil)
 	Println(r.OK)
 	Println(len(r.Value.([]PullResult)))
 	// Output:
@@ -83,7 +83,7 @@ func ExamplePullMultiple() {
 }
 
 func ExamplePullMultipleIter() {
-	results := collectSeq(PullMultipleIter(Background(), []string{"relative/repo"}, nil))
+	results := collectSeq(PullMultipleIter(Background(), []string{relativeRepoPath}, nil))
 	Println(len(results))
 	Println(results[0].Success)
 	// Output:

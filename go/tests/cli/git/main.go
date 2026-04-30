@@ -10,6 +10,8 @@ import (
 	gitlib "dappco.re/go/git"
 )
 
+const relativeRepoPath = "relative/repo"
+
 func main() {
 	r := run()
 	if !r.OK {
@@ -136,66 +138,95 @@ func verifyPushPull(ctx core.Context) core.Result {
 	rootPath := root.Value.(string)
 	defer cleanupTempDir(rootPath)
 
+	workspace, r := setupPushPullWorkspace(rootPath)
+	if !r.OK {
+		return r
+	}
+	if r := verifyPushAndPullStates(ctx, workspace); !r.OK {
+		return r
+	}
+	if r := verifyPushAndPullMultiple(ctx, workspace); !r.OK {
+		return r
+	}
+	return core.Ok(nil)
+}
+
+type pushPullWorkspace struct {
+	pushClone string
+	pullClone string
+}
+
+func setupPushPullWorkspace(rootPath string) (pushPullWorkspace, core.Result) {
+	workspace := pushPullWorkspace{
+		pushClone: core.Path(rootPath, "push"),
+		pullClone: core.Path(rootPath, "pull"),
+	}
 	remote := core.Path(rootPath, "remote.git")
-	pushClone := core.Path(rootPath, "push")
-	pullClone := core.Path(rootPath, "pull")
 
 	if r := runGit(rootPath, "init", "--bare", remote); !r.OK {
+		return workspace, r
+	}
+	if r := runGit(rootPath, "clone", remote, workspace.pushClone); !r.OK {
+		return workspace, r
+	}
+	if r := configureUser(workspace.pushClone); !r.OK {
+		return workspace, r
+	}
+	if r := commitFile(workspace.pushClone, "file.txt", "v1\n", "initial commit"); !r.OK {
+		return workspace, r
+	}
+	if r := runGit(workspace.pushClone, "push", "-u", "origin", "HEAD"); !r.OK {
+		return workspace, r
+	}
+	if r := runGit(rootPath, "clone", remote, workspace.pullClone); !r.OK {
+		return workspace, r
+	}
+	if r := configureUser(workspace.pullClone); !r.OK {
+		return workspace, r
+	}
+	if r := commitFile(workspace.pushClone, "file.txt", "v2\n", "local commit"); !r.OK {
+		return workspace, r
+	}
+
+	return workspace, core.Ok(nil)
+}
+
+func verifyPushAndPullStates(ctx core.Context, workspace pushPullWorkspace) core.Result {
+	if r := verifyRepoStatus(ctx, workspace.pushClone, "push", 1, 0); !r.OK {
 		return r
 	}
-	if r := runGit(rootPath, "clone", remote, pushClone); !r.OK {
+	if r := gitlib.Push(ctx, workspace.pushClone); !r.OK {
 		return r
 	}
-	if r := configureUser(pushClone); !r.OK {
+	if r := verifyRepoStatus(ctx, workspace.pushClone, "push", 0, 0); !r.OK {
 		return r
 	}
-	if r := commitFile(pushClone, "file.txt", "v1\n", "initial commit"); !r.OK {
+	if r := runGit(workspace.pullClone, "fetch", "origin"); !r.OK {
 		return r
 	}
-	if r := runGit(pushClone, "push", "-u", "origin", "HEAD"); !r.OK {
+	if r := verifyRepoStatus(ctx, workspace.pullClone, "pull", 0, 1); !r.OK {
+		return r
+	}
+	if r := gitlib.Pull(ctx, workspace.pullClone); !r.OK {
+		return r
+	}
+	if r := verifyRepoStatus(ctx, workspace.pullClone, "pull", 0, 0); !r.OK {
 		return r
 	}
 
-	if r := runGit(rootPath, "clone", remote, pullClone); !r.OK {
-		return r
-	}
-	if r := configureUser(pullClone); !r.OK {
-		return r
-	}
+	return core.Ok(nil)
+}
 
-	if r := commitFile(pushClone, "file.txt", "v2\n", "local commit"); !r.OK {
-		return r
-	}
-	statuses := gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{pushClone}, Names: map[string]string{pushClone: "push"}})
-	if r := expectSingleStatus(statuses, "push", 1, 0); !r.OK {
-		return r
-	}
+func verifyRepoStatus(ctx core.Context, path, name string, ahead, behind int) core.Result {
+	statuses := gitlib.Status(ctx, gitlib.StatusOptions{
+		Paths: []string{path},
+		Names: map[string]string{path: name},
+	})
+	return expectSingleStatus(statuses, name, ahead, behind)
+}
 
-	if r := gitlib.Push(ctx, pushClone); !r.OK {
-		return r
-	}
-	statuses = gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{pushClone}, Names: map[string]string{pushClone: "push"}})
-	if r := expectSingleStatus(statuses, "push", 0, 0); !r.OK {
-		return r
-	}
-
-	if r := runGit(pullClone, "fetch", "origin"); !r.OK {
-		return r
-	}
-	statuses = gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{pullClone}, Names: map[string]string{pullClone: "pull"}})
-	if r := expectSingleStatus(statuses, "pull", 0, 1); !r.OK {
-		return r
-	}
-
-	if r := gitlib.Pull(ctx, pullClone); !r.OK {
-		return r
-	}
-	statuses = gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{pullClone}, Names: map[string]string{pullClone: "pull"}})
-	if r := expectSingleStatus(statuses, "pull", 0, 0); !r.OK {
-		return r
-	}
-
-	pushMultiple := gitlib.PushMultiple(ctx, []string{pushClone}, map[string]string{pushClone: "push"})
+func verifyPushAndPullMultiple(ctx core.Context, workspace pushPullWorkspace) core.Result {
+	pushMultiple := gitlib.PushMultiple(ctx, []string{workspace.pushClone}, map[string]string{workspace.pushClone: "push"})
 	if !pushMultiple.OK {
 		return pushMultiple
 	}
@@ -204,7 +235,7 @@ func verifyPushPull(ctx core.Context) core.Result {
 		return core.Fail(core.Errorf("unexpected push multiple results: %+v", pushResults))
 	}
 
-	pullMultiple := gitlib.PullMultiple(ctx, []string{pullClone}, map[string]string{pullClone: "pull"})
+	pullMultiple := gitlib.PullMultiple(ctx, []string{workspace.pullClone}, map[string]string{workspace.pullClone: "pull"})
 	if !pullMultiple.OK {
 		return pullMultiple
 	}
@@ -240,7 +271,7 @@ func expectSingleStatus(statuses []gitlib.RepoStatus, name string, ahead, behind
 }
 
 func verifyErrors(ctx core.Context) core.Result {
-	statuses := gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{"relative/repo"}})
+	statuses := gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{relativeRepoPath}})
 	if len(statuses) != 1 || statuses[0].Error == nil {
 		return core.Fail(core.NewError("relative status should fail"))
 	}
@@ -248,10 +279,10 @@ func verifyErrors(ctx core.Context) core.Result {
 		return core.Fail(core.Errorf("relative status error = %v", statuses[0].Error))
 	}
 
-	if r := gitlib.Push(ctx, "relative/repo"); r.OK {
+	if r := gitlib.Push(ctx, relativeRepoPath); r.OK {
 		return core.Fail(core.NewError("relative push should fail"))
 	}
-	if r := gitlib.Pull(ctx, "relative/repo"); r.OK {
+	if r := gitlib.Pull(ctx, relativeRepoPath); r.OK {
 		return core.Fail(core.NewError("relative pull should fail"))
 	}
 	if !gitlib.IsNonFastForward(core.NewError("Updates were rejected: fetch first")) {

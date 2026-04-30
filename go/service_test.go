@@ -1,5 +1,10 @@
 package git
 
+const (
+	relativeWorkDir = "relative/workdir"
+	statusFailed    = "status failed"
+)
+
 func repoNames(statuses []RepoStatus) []string {
 	names := make([]string, 0, len(statuses))
 	for _, st := range statuses {
@@ -26,13 +31,13 @@ func TestService_NewService_Good(t *T) {
 
 func TestService_NewService_Bad(t *T) {
 	c := New()
-	opts := ServiceOptions{WorkDir: "relative/workdir"}
+	opts := ServiceOptions{WorkDir: relativeWorkDir}
 
 	r := NewService(opts)(c)
 
 	AssertTrue(t, r.OK)
 	svc := r.Value.(*Service)
-	AssertEqual(t, "relative/workdir", svc.opts.WorkDir)
+	AssertEqual(t, relativeWorkDir, svc.opts.WorkDir)
 }
 
 func TestService_NewService_Ugly(t *T) {
@@ -57,14 +62,14 @@ func TestService_Service_OnStartup_Good(t *T) {
 
 func TestService_Service_OnStartup_Bad(t *T) {
 	c := New()
-	svc := &Service{ServiceRuntime: NewServiceRuntime(c, ServiceOptions{WorkDir: "relative/workdir"})}
+	svc := &Service{ServiceRuntime: NewServiceRuntime(c, ServiceOptions{WorkDir: relativeWorkDir})}
 
 	r := svc.OnStartup(Background())
 
 	AssertTrue(t, r.OK)
-	result := c.Action(actionGitPush).Run(Background(), NewOptions(Option{Key: actionPathKey, Value: "relative/repo"}))
+	result := c.Action(actionGitPush).Run(Background(), NewOptions(Option{Key: actionPathKey, Value: relativeRepoPath}))
 	AssertFalse(t, result.OK)
-	AssertContains(t, result.Error(), "path must be absolute")
+	AssertContains(t, result.Error(), pathMustBeAbsolute)
 }
 
 func TestService_Service_OnStartup_Ugly(t *T) {
@@ -142,7 +147,7 @@ func TestService_Service_Dirty_Good(t *T) {
 }
 
 func TestService_Service_Dirty_Bad(t *T) {
-	svc := testService(RepoStatus{Name: "errored", Modified: 1, Error: NewError("status failed")})
+	svc := testService(RepoStatus{Name: "errored", Modified: 1, Error: NewError(statusFailed)})
 
 	dirty := collectSeq(svc.Dirty())
 
@@ -170,7 +175,7 @@ func TestService_Service_Ahead_Good(t *T) {
 }
 
 func TestService_Service_Ahead_Bad(t *T) {
-	svc := testService(RepoStatus{Name: "errored", Ahead: 1, Error: NewError("status failed")})
+	svc := testService(RepoStatus{Name: "errored", Ahead: 1, Error: NewError(statusFailed)})
 
 	ahead := collectSeq(svc.Ahead())
 
@@ -198,7 +203,7 @@ func TestService_Service_Behind_Good(t *T) {
 }
 
 func TestService_Service_Behind_Bad(t *T) {
-	svc := testService(RepoStatus{Name: "errored", Behind: 1, Error: NewError("status failed")})
+	svc := testService(RepoStatus{Name: "errored", Behind: 1, Error: NewError(statusFailed)})
 
 	behind := collectSeq(svc.Behind())
 
@@ -233,7 +238,7 @@ func TestService_Service_DirtyRepos_Good(t *T) {
 }
 
 func TestService_Service_DirtyRepos_Bad(t *T) {
-	svc := testService(RepoStatus{Name: "dirty-error", Modified: 1, Error: NewError("status failed")})
+	svc := testService(RepoStatus{Name: "dirty-error", Modified: 1, Error: NewError(statusFailed)})
 
 	dirty := svc.DirtyRepos()
 
@@ -258,7 +263,7 @@ func TestService_Service_AheadRepos_Good(t *T) {
 }
 
 func TestService_Service_AheadRepos_Bad(t *T) {
-	svc := testService(RepoStatus{Name: "ahead-error", Ahead: 1, Error: NewError("status failed")})
+	svc := testService(RepoStatus{Name: "ahead-error", Ahead: 1, Error: NewError(statusFailed)})
 
 	ahead := svc.AheadRepos()
 
@@ -283,7 +288,7 @@ func TestService_Service_BehindRepos_Good(t *T) {
 }
 
 func TestService_Service_BehindRepos_Bad(t *T) {
-	svc := testService(RepoStatus{Name: "behind-error", Behind: 1, Error: NewError("status failed")})
+	svc := testService(RepoStatus{Name: "behind-error", Behind: 1, Error: NewError(statusFailed)})
 
 	behind := svc.BehindRepos()
 
