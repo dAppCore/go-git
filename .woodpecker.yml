@@ -14,7 +14,7 @@ steps:
       GOFLAGS: -buildvcs=false
       GOWORK: "off"
     commands:
-      - golangci-lint run --timeout=5m ./...
+      - cd go && golangci-lint run --timeout=5m ./...
 
   - name: go-test
     image: golang:1.26-alpine
@@ -25,7 +25,7 @@ steps:
       CGO_ENABLED: "1"
     commands:
       - apk add --no-cache git build-base
-      - go test -race -coverprofile=coverage.out -covermode=atomic -count=1 ./...
+      - cd go && go test -race -coverprofile=coverage.out -covermode=atomic -count=1 ./...
   - name: sonar
     image: sonarsource/sonar-scanner-cli:latest
     depends_on: [go-test]
