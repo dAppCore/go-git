@@ -203,7 +203,7 @@ func TestGit_Status_Bad(t *T) {
 }
 
 func TestGit_Status_Ugly(t *T) {
-	statuses := Status(nil, StatusOptions{})
+	statuses := Status(Background(), StatusOptions{})
 	AssertLen(t, statuses, 0)
 	AssertNil(t, statuses)
 }
@@ -261,7 +261,7 @@ func TestGit_Push_Bad(t *T) {
 
 func TestGit_Push_Ugly(t *T) {
 	dir := initPushableRepo(t)
-	r := Push(nil, dir)
+	r := Push(Background(), dir)
 	AssertTrue(t, r.OK, r.Error())
 }
 
@@ -284,7 +284,7 @@ func TestGit_Pull_Bad(t *T) {
 
 func TestGit_Pull_Ugly(t *T) {
 	dir := initPullableRepo(t)
-	r := Pull(nil, dir)
+	r := Pull(Background(), dir)
 	AssertTrue(t, r.OK, r.Error())
 }
 

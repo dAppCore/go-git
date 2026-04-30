@@ -6,20 +6,20 @@
 package main
 
 import (
-	. "dappco.re/go"
+	core "dappco.re/go"
 	gitlib "dappco.re/go/git"
 )
 
 func main() {
 	r := run()
 	if !r.OK {
-		Print(Stderr(), "%v", r.Value)
-		Exit(1)
+		core.Print(core.Stderr(), "%v", r.Value)
+		core.Exit(1)
 	}
 }
 
-func run() Result {
-	ctx := Background()
+func run() core.Result {
+	ctx := core.Background()
 
 	if r := verifyStatus(ctx); !r.OK {
 		return r
@@ -31,10 +31,10 @@ func run() Result {
 		return r
 	}
 
-	return Ok(nil)
+	return core.Ok(nil)
 }
 
-func verifyStatus(ctx Context) Result {
+func verifyStatus(ctx core.Context) core.Result {
 	clean := initRepo()
 	if !clean.OK {
 		return clean
@@ -49,16 +49,16 @@ func verifyStatus(ctx Context) Result {
 	dirtyPath := dirty.Value.(string)
 	defer cleanupTempDir(dirtyPath)
 
-	if r := WriteFile(Path(dirtyPath, "README.md"), []byte("# Changed\n"), 0o644); !r.OK {
+	if r := core.WriteFile(core.Path(dirtyPath, "README.md"), []byte("# Changed\n"), 0o644); !r.OK {
 		return r
 	}
-	if r := WriteFile(Path(dirtyPath, "staged.txt"), []byte("staged\n"), 0o644); !r.OK {
+	if r := core.WriteFile(core.Path(dirtyPath, "staged.txt"), []byte("staged\n"), 0o644); !r.OK {
 		return r
 	}
 	if r := runGit(dirtyPath, "add", "staged.txt"); !r.OK {
 		return r
 	}
-	if r := WriteFile(Path(dirtyPath, "untracked.txt"), []byte("untracked\n"), 0o644); !r.OK {
+	if r := core.WriteFile(core.Path(dirtyPath, "untracked.txt"), []byte("untracked\n"), 0o644); !r.OK {
 		return r
 	}
 
@@ -83,62 +83,62 @@ func verifyStatus(ctx Context) Result {
 		return r
 	}
 
-	return Ok(nil)
+	return core.Ok(nil)
 }
 
-func verifyStatusResults(statuses []gitlib.RepoStatus, clean, dirty string) Result {
+func verifyStatusResults(statuses []gitlib.RepoStatus, clean, dirty string) core.Result {
 	if len(statuses) != 2 {
-		return Fail(Errorf("expected 2 statuses, got %d", len(statuses)))
+		return core.Fail(core.Errorf("expected 2 statuses, got %d", len(statuses)))
 	}
 
 	cleanStatus := statuses[0]
 	if cleanStatus.Name != "clean-repo" {
-		return Fail(Errorf("clean name = %q", cleanStatus.Name))
+		return core.Fail(core.Errorf("clean name = %q", cleanStatus.Name))
 	}
 	if cleanStatus.Path != clean {
-		return Fail(Errorf("clean file = %q", cleanStatus.Path))
+		return core.Fail(core.Errorf("clean file = %q", cleanStatus.Path))
 	}
 	if cleanStatus.Error != nil {
-		return Fail(cleanStatus.Error)
+		return core.Fail(cleanStatus.Error)
 	}
 	if cleanStatus.Branch == "" {
-		return Fail(NewError("clean branch should not be empty"))
+		return core.Fail(core.NewError("clean branch should not be empty"))
 	}
 	if cleanStatus.IsDirty() {
-		return Fail(NewError("clean repo reported dirty"))
+		return core.Fail(core.NewError("clean repo reported dirty"))
 	}
 
 	dirtyStatus := statuses[1]
 	if dirtyStatus.Name != "dirty-repo" {
-		return Fail(Errorf("dirty name = %q", dirtyStatus.Name))
+		return core.Fail(core.Errorf("dirty name = %q", dirtyStatus.Name))
 	}
 	if dirtyStatus.Path != dirty {
-		return Fail(Errorf("dirty file = %q", dirtyStatus.Path))
+		return core.Fail(core.Errorf("dirty file = %q", dirtyStatus.Path))
 	}
 	if dirtyStatus.Error != nil {
-		return Fail(dirtyStatus.Error)
+		return core.Fail(dirtyStatus.Error)
 	}
 	if !dirtyStatus.IsDirty() {
-		return Fail(NewError("dirty repo reported clean"))
+		return core.Fail(core.NewError("dirty repo reported clean"))
 	}
 	if dirtyStatus.Modified != 1 || dirtyStatus.Staged != 1 || dirtyStatus.Untracked != 1 {
-		return Fail(Errorf("dirty counts = modified:%d staged:%d untracked:%d", dirtyStatus.Modified, dirtyStatus.Staged, dirtyStatus.Untracked))
+		return core.Fail(core.Errorf("dirty counts = modified:%d staged:%d untracked:%d", dirtyStatus.Modified, dirtyStatus.Staged, dirtyStatus.Untracked))
 	}
 
-	return Ok(nil)
+	return core.Ok(nil)
 }
 
-func verifyPushPull(ctx Context) Result {
-	root := MkdirTemp("", "go-git-ax10-")
+func verifyPushPull(ctx core.Context) core.Result {
+	root := core.MkdirTemp("", "go-git-ax10-")
 	if !root.OK {
 		return root
 	}
 	rootPath := root.Value.(string)
 	defer cleanupTempDir(rootPath)
 
-	remote := Path(rootPath, "remote.git")
-	pushClone := Path(rootPath, "push")
-	pullClone := Path(rootPath, "pull")
+	remote := core.Path(rootPath, "remote.git")
+	pushClone := core.Path(rootPath, "push")
+	pullClone := core.Path(rootPath, "pull")
 
 	if r := runGit(rootPath, "init", "--bare", remote); !r.OK {
 		return r
@@ -201,7 +201,7 @@ func verifyPushPull(ctx Context) Result {
 	}
 	pushResults := pushMultiple.Value.([]gitlib.PushResult)
 	if len(pushResults) != 1 || !pushResults[0].Success || pushResults[0].Name != "push" {
-		return Fail(Errorf("unexpected push multiple results: %+v", pushResults))
+		return core.Fail(core.Errorf("unexpected push multiple results: %+v", pushResults))
 	}
 
 	pullMultiple := gitlib.PullMultiple(ctx, []string{pullClone}, map[string]string{pullClone: "pull"})
@@ -210,62 +210,62 @@ func verifyPushPull(ctx Context) Result {
 	}
 	pullResults := pullMultiple.Value.([]gitlib.PullResult)
 	if len(pullResults) != 1 || !pullResults[0].Success || pullResults[0].Name != "pull" {
-		return Fail(Errorf("unexpected pull multiple results: %+v", pullResults))
+		return core.Fail(core.Errorf("unexpected pull multiple results: %+v", pullResults))
 	}
 
-	return Ok(nil)
+	return core.Ok(nil)
 }
 
-func expectSingleStatus(statuses []gitlib.RepoStatus, name string, ahead, behind int) Result {
+func expectSingleStatus(statuses []gitlib.RepoStatus, name string, ahead, behind int) core.Result {
 	if len(statuses) != 1 {
-		return Fail(Errorf("expected 1 status, got %d", len(statuses)))
+		return core.Fail(core.Errorf("expected 1 status, got %d", len(statuses)))
 	}
 	status := statuses[0]
 	if status.Error != nil {
-		return Fail(status.Error)
+		return core.Fail(status.Error)
 	}
 	if status.Name != name {
-		return Fail(Errorf("status name = %q", status.Name))
+		return core.Fail(core.Errorf("status name = %q", status.Name))
 	}
 	if status.Ahead != ahead || status.Behind != behind {
-		return Fail(Errorf("%s ahead/behind = %d/%d, want %d/%d", name, status.Ahead, status.Behind, ahead, behind))
+		return core.Fail(core.Errorf("%s ahead/behind = %d/%d, want %d/%d", name, status.Ahead, status.Behind, ahead, behind))
 	}
 	if ahead > 0 && !status.HasUnpushed() {
-		return Fail(Errorf("%s should report unpushed commits", name))
+		return core.Fail(core.Errorf("%s should report unpushed commits", name))
 	}
 	if behind > 0 && !status.HasUnpulled() {
-		return Fail(Errorf("%s should report unpulled commits", name))
+		return core.Fail(core.Errorf("%s should report unpulled commits", name))
 	}
-	return Ok(nil)
+	return core.Ok(nil)
 }
 
-func verifyErrors(ctx Context) Result {
+func verifyErrors(ctx core.Context) core.Result {
 	statuses := gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{"relative/repo"}})
 	if len(statuses) != 1 || statuses[0].Error == nil {
-		return Fail(NewError("relative status should fail"))
+		return core.Fail(core.NewError("relative status should fail"))
 	}
-	if !Contains(statuses[0].Error.Error(), "path must be absolute") {
-		return Fail(Errorf("relative status error = %v", statuses[0].Error))
+	if !core.Contains(statuses[0].Error.Error(), "path must be absolute") {
+		return core.Fail(core.Errorf("relative status error = %v", statuses[0].Error))
 	}
 
 	if r := gitlib.Push(ctx, "relative/repo"); r.OK {
-		return Fail(NewError("relative push should fail"))
+		return core.Fail(core.NewError("relative push should fail"))
 	}
 	if r := gitlib.Pull(ctx, "relative/repo"); r.OK {
-		return Fail(NewError("relative pull should fail"))
+		return core.Fail(core.NewError("relative pull should fail"))
 	}
-	if !gitlib.IsNonFastForward(NewError("Updates were rejected: fetch first")) {
-		return Fail(NewError("non-fast-forward detection should match fetch first errors"))
+	if !gitlib.IsNonFastForward(core.NewError("Updates were rejected: fetch first")) {
+		return core.Fail(core.NewError("non-fast-forward detection should match fetch first errors"))
 	}
-	if gitlib.IsNonFastForward(NewError("connection refused")) {
-		return Fail(NewError("non-fast-forward detection should ignore unrelated errors"))
+	if gitlib.IsNonFastForward(core.NewError("connection refused")) {
+		return core.Fail(core.NewError("non-fast-forward detection should ignore unrelated errors"))
 	}
 
-	return Ok(nil)
+	return core.Ok(nil)
 }
 
-func initRepo() Result {
-	dir := MkdirTemp("", "go-git-ax10-repo-")
+func initRepo() core.Result {
+	dir := core.MkdirTemp("", "go-git-ax10-repo-")
 	if !dir.OK {
 		return dir
 	}
@@ -282,25 +282,25 @@ func initRepo() Result {
 		cleanupTempDir(dirPath)
 		return r
 	}
-	return Ok(dirPath)
+	return core.Ok(dirPath)
 }
 
 func cleanupTempDir(target string) {
-	r := RemoveAll(target)
+	r := core.RemoveAll(target)
 	if !r.OK {
-		Print(Stderr(), "cleanup %s: %v", target, r.Value)
+		core.Print(core.Stderr(), "cleanup %s: %v", target, r.Value)
 	}
 }
 
-func configureUser(dir string) Result {
+func configureUser(dir string) core.Result {
 	if r := runGit(dir, "config", "user.email", "test@example.com"); !r.OK {
 		return r
 	}
 	return runGit(dir, "config", "user.name", "Test User")
 }
 
-func commitFile(dir, name, content, message string) Result {
-	if r := WriteFile(Path(dir, name), []byte(content), 0o644); !r.OK {
+func commitFile(dir, name, content, message string) core.Result {
+	if r := core.WriteFile(core.Path(dir, name), []byte(content), 0o644); !r.OK {
 		return r
 	}
 	if r := runGit(dir, "add", name); !r.OK {
@@ -309,12 +309,12 @@ func commitFile(dir, name, content, message string) Result {
 	return runGit(dir, "commit", "-m", message)
 }
 
-func runGit(dir string, args ...string) Result {
+func runGit(dir string, args ...string) core.Result {
 	cmdArgs := append([]string{"env", "git"}, args...)
-	cmd := &Cmd{Path: "/usr/bin/env", Args: cmdArgs, Dir: dir}
+	cmd := &core.Cmd{Path: "/usr/bin/env", Args: cmdArgs, Dir: dir}
 	out, runErr := cmd.CombinedOutput()
 	if runErr != nil {
-		return Fail(Errorf("git %s: %s: %w", Join(" ", args...), Trim(string(out)), runErr))
+		return core.Fail(core.Errorf("git %s: %s: %w", core.Join(" ", args...), core.Trim(string(out)), runErr))
 	}
-	return Ok(string(out))
+	return core.Ok(string(out))
 }
