@@ -90,41 +90,42 @@ func verifyStatus(ctx core.Context) core.Result {
 
 func verifyStatusResults(statuses []gitlib.RepoStatus, clean, dirty string) core.Result {
 	if len(statuses) != 2 {
-		return core.Fail(core.Errorf("expected 2 statuses, got %d", len(statuses)))
+		return core.Fail(core.E("git.cli.verifyStatusResults", core.Sprintf("expected 2 statuses, got %d", len(statuses)), nil))
 	}
 
 	cleanStatus := statuses[0]
 	if cleanStatus.Name != "clean-repo" {
-		return core.Fail(core.Errorf("clean name = %q", cleanStatus.Name))
+		return core.Fail(core.E("git.cli.verifyStatusResults", core.Sprintf("clean name = %q", cleanStatus.Name), nil))
 	}
 	if cleanStatus.Path != clean {
-		return core.Fail(core.Errorf("clean file = %q", cleanStatus.Path))
+		return core.Fail(core.E("git.cli.verifyStatusResults", core.Sprintf("clean file = %q", cleanStatus.Path), nil))
 	}
 	if cleanStatus.Error != nil {
 		return core.Fail(cleanStatus.Error)
 	}
 	if cleanStatus.Branch == "" {
-		return core.Fail(core.NewError("clean branch should not be empty"))
+		return core.Fail(core.E("git.cli.verifyStatusResults", "clean branch should not be empty", nil))
 	}
 	if cleanStatus.IsDirty() {
-		return core.Fail(core.NewError("clean repo reported dirty"))
+		return core.Fail(core.E("git.cli.verifyStatusResults", "clean repo reported dirty", nil))
 	}
 
 	dirtyStatus := statuses[1]
 	if dirtyStatus.Name != "dirty-repo" {
-		return core.Fail(core.Errorf("dirty name = %q", dirtyStatus.Name))
+		return core.Fail(core.E("git.cli.verifyStatusResults", core.Sprintf("dirty name = %q", dirtyStatus.Name), nil))
 	}
 	if dirtyStatus.Path != dirty {
-		return core.Fail(core.Errorf("dirty file = %q", dirtyStatus.Path))
+		return core.Fail(core.E("git.cli.verifyStatusResults", core.Sprintf("dirty file = %q", dirtyStatus.Path), nil))
 	}
 	if dirtyStatus.Error != nil {
 		return core.Fail(dirtyStatus.Error)
 	}
 	if !dirtyStatus.IsDirty() {
-		return core.Fail(core.NewError("dirty repo reported clean"))
+		return core.Fail(core.E("git.cli.verifyStatusResults", "dirty repo reported clean", nil))
 	}
 	if dirtyStatus.Modified != 1 || dirtyStatus.Staged != 1 || dirtyStatus.Untracked != 1 {
-		return core.Fail(core.Errorf("dirty counts = modified:%d staged:%d untracked:%d", dirtyStatus.Modified, dirtyStatus.Staged, dirtyStatus.Untracked))
+		msg := core.Sprintf("dirty counts = modified:%d staged:%d untracked:%d", dirtyStatus.Modified, dirtyStatus.Staged, dirtyStatus.Untracked)
+		return core.Fail(core.E("git.cli.verifyStatusResults", msg, nil))
 	}
 
 	return core.Ok(nil)
@@ -232,7 +233,7 @@ func verifyPushAndPullMultiple(ctx core.Context, workspace pushPullWorkspace) co
 	}
 	pushResults := pushMultiple.Value.([]gitlib.PushResult)
 	if len(pushResults) != 1 || !pushResults[0].Success || pushResults[0].Name != "push" {
-		return core.Fail(core.Errorf("unexpected push multiple results: %+v", pushResults))
+		return core.Fail(core.E("git.cli.verifyPushAndPullMultiple", core.Sprintf("unexpected push multiple results: %+v", pushResults), nil))
 	}
 
 	pullMultiple := gitlib.PullMultiple(ctx, []string{workspace.pullClone}, map[string]string{workspace.pullClone: "pull"})
@@ -241,7 +242,7 @@ func verifyPushAndPullMultiple(ctx core.Context, workspace pushPullWorkspace) co
 	}
 	pullResults := pullMultiple.Value.([]gitlib.PullResult)
 	if len(pullResults) != 1 || !pullResults[0].Success || pullResults[0].Name != "pull" {
-		return core.Fail(core.Errorf("unexpected pull multiple results: %+v", pullResults))
+		return core.Fail(core.E("git.cli.verifyPushAndPullMultiple", core.Sprintf("unexpected pull multiple results: %+v", pullResults), nil))
 	}
 
 	return core.Ok(nil)
@@ -249,23 +250,24 @@ func verifyPushAndPullMultiple(ctx core.Context, workspace pushPullWorkspace) co
 
 func expectSingleStatus(statuses []gitlib.RepoStatus, name string, ahead, behind int) core.Result {
 	if len(statuses) != 1 {
-		return core.Fail(core.Errorf("expected 1 status, got %d", len(statuses)))
+		return core.Fail(core.E("git.cli.expectSingleStatus", core.Sprintf("expected 1 status, got %d", len(statuses)), nil))
 	}
 	status := statuses[0]
 	if status.Error != nil {
 		return core.Fail(status.Error)
 	}
 	if status.Name != name {
-		return core.Fail(core.Errorf("status name = %q", status.Name))
+		return core.Fail(core.E("git.cli.expectSingleStatus", core.Sprintf("status name = %q", status.Name), nil))
 	}
 	if status.Ahead != ahead || status.Behind != behind {
-		return core.Fail(core.Errorf("%s ahead/behind = %d/%d, want %d/%d", name, status.Ahead, status.Behind, ahead, behind))
+		msg := core.Sprintf("%s ahead/behind = %d/%d, want %d/%d", name, status.Ahead, status.Behind, ahead, behind)
+		return core.Fail(core.E("git.cli.expectSingleStatus", msg, nil))
 	}
 	if ahead > 0 && !status.HasUnpushed() {
-		return core.Fail(core.Errorf("%s should report unpushed commits", name))
+		return core.Fail(core.E("git.cli.expectSingleStatus", core.Sprintf("%s should report unpushed commits", name), nil))
 	}
 	if behind > 0 && !status.HasUnpulled() {
-		return core.Fail(core.Errorf("%s should report unpulled commits", name))
+		return core.Fail(core.E("git.cli.expectSingleStatus", core.Sprintf("%s should report unpulled commits", name), nil))
 	}
 	return core.Ok(nil)
 }
@@ -273,23 +275,23 @@ func expectSingleStatus(statuses []gitlib.RepoStatus, name string, ahead, behind
 func verifyErrors(ctx core.Context) core.Result {
 	statuses := gitlib.Status(ctx, gitlib.StatusOptions{Paths: []string{relativeRepoPath}})
 	if len(statuses) != 1 || statuses[0].Error == nil {
-		return core.Fail(core.NewError("relative status should fail"))
+		return core.Fail(core.E("git.cli.verifyErrors", "relative status should fail", nil))
 	}
 	if !core.Contains(statuses[0].Error.Error(), "path must be absolute") {
-		return core.Fail(core.Errorf("relative status error = %v", statuses[0].Error))
+		return core.Fail(core.E("git.cli.verifyErrors", core.Sprintf("relative status error = %v", statuses[0].Error), nil))
 	}
 
 	if r := gitlib.Push(ctx, relativeRepoPath); r.OK {
-		return core.Fail(core.NewError("relative push should fail"))
+		return core.Fail(core.E("git.cli.verifyErrors", "relative push should fail", nil))
 	}
 	if r := gitlib.Pull(ctx, relativeRepoPath); r.OK {
-		return core.Fail(core.NewError("relative pull should fail"))
+		return core.Fail(core.E("git.cli.verifyErrors", "relative pull should fail", nil))
 	}
-	if !gitlib.IsNonFastForward(core.NewError("Updates were rejected: fetch first")) {
-		return core.Fail(core.NewError("non-fast-forward detection should match fetch first errors"))
+	if !gitlib.IsNonFastForward(core.E("git.cli.verifyErrors", "Updates were rejected: fetch first", nil)) {
+		return core.Fail(core.E("git.cli.verifyErrors", "non-fast-forward detection should match fetch first errors", nil))
 	}
-	if gitlib.IsNonFastForward(core.NewError("connection refused")) {
-		return core.Fail(core.NewError("non-fast-forward detection should ignore unrelated errors"))
+	if gitlib.IsNonFastForward(core.E("git.cli.verifyErrors", "connection refused", nil)) {
+		return core.Fail(core.E("git.cli.verifyErrors", "non-fast-forward detection should ignore unrelated errors", nil))
 	}
 
 	return core.Ok(nil)
@@ -345,7 +347,8 @@ func runGit(dir string, args ...string) core.Result {
 	cmd := &core.Cmd{Path: "/usr/bin/env", Args: cmdArgs, Dir: dir}
 	out, runErr := cmd.CombinedOutput()
 	if runErr != nil {
-		return core.Fail(core.Errorf("git %s: %s: %w", core.Join(" ", args...), core.Trim(string(out)), runErr))
+		msg := core.Sprintf("git %s: %s", core.Join(" ", args...), core.Trim(string(out)))
+		return core.Fail(core.E("git.cli.runGit", msg, runErr))
 	}
 	return core.Ok(string(out))
 }
