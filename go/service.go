@@ -224,7 +224,10 @@ func (s *Service) runPushMultiple(ctx core.Context, paths []string, names map[st
 	if !results.OK {
 		pushResults := results.Value.([]PushResult)
 		if last := lastPushError(pushResults); last != nil {
-			_ = s.logError(last, actionGitPushMultiple, "push multiple had failures")
+			logged := s.logError(last, actionGitPushMultiple, "push multiple had failures")
+			if !logged.OK && results.Value == nil {
+				return logged
+			}
 		}
 	}
 	return results
@@ -240,7 +243,10 @@ func (s *Service) runPullMultiple(ctx core.Context, paths []string, names map[st
 	if !results.OK {
 		pullResults := results.Value.([]PullResult)
 		if last := lastPullError(pullResults); last != nil {
-			_ = s.logError(last, actionGitPullMultiple, "pull multiple had failures")
+			logged := s.logError(last, actionGitPullMultiple, "pull multiple had failures")
+			if !logged.OK && results.Value == nil {
+				return logged
+			}
 		}
 	}
 	return results
