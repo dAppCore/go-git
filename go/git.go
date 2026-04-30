@@ -31,9 +31,9 @@ func resultError(r core.Result) *GitError {
 	}
 	if r.Value != nil {
 		msg := core.Sprint(r.Value)
-		return &GitError{Err: core.NewError(msg), Stderr: msg}
+		return &GitError{Err: core.E("git.resultError", msg, nil), Stderr: msg}
 	}
-	return &GitError{Err: core.NewError("operation failed"), Stderr: "operation failed"}
+	return &GitError{Err: core.E("git.resultError", "operation failed", nil), Stderr: "operation failed"}
 }
 
 func gitCmd(dir string, args ...string) *core.Cmd {

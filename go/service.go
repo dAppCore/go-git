@@ -376,11 +376,11 @@ func gitServiceError(op, msg string, err error) *GitError {
 }
 
 func gitServiceErrorWithArgs(args []string, msg string, err error) *GitError {
-	if err == nil {
-		err = core.NewError(msg)
-	} else {
-		err = core.E("git.service", msg, err)
+	op := "git.service"
+	if len(args) > 0 && args[0] != "" {
+		op = args[0]
 	}
+	err = core.E(op, msg, err)
 	return &GitError{
 		Args:   args,
 		Err:    err,
