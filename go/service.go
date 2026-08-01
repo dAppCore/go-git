@@ -2,6 +2,7 @@ package git
 
 import (
 	"iter"
+	"maps"
 
 	core "dappco.re/go"
 )
@@ -341,9 +342,7 @@ func resolvedNames(paths, resolvedPaths []string, names map[string]string) map[s
 	}
 
 	resolved := make(map[string]string, len(names)+len(resolvedPaths))
-	for path, name := range names {
-		resolved[path] = name
-	}
+	maps.Copy(resolved, names)
 	for i, path := range paths {
 		if i >= len(resolvedPaths) {
 			break
