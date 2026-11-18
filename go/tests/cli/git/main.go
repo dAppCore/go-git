@@ -6,8 +6,8 @@
 package main
 
 import (
-	core "dappco.re/go"
-	gitlib "dappco.re/go/git"
+	core "github.com/dappcore/go"
+	gitlib "github.com/dappcore/go-git/go"
 )
 
 const relativeRepoPath = "relative/repo"

@@ -1,7 +1,7 @@
 package git
 
 import (
-	core "dappco.re/go"
+	core "github.com/dappcore/go"
 )
 
 type T = core.T

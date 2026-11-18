@@ -4,7 +4,7 @@ package git
 import (
 	"iter"
 
-	core "dappco.re/go"
+	core "github.com/dappcore/go"
 )
 
 func withBackground(ctx core.Context) core.Context {

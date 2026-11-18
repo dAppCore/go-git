@@ -1,2 +1,2 @@
-dappco.re/go v0.12.0 h1:lotJop5nvhrIQ1J2L5IP37H72ihnQnIjNzFT0iMEfx0=
-dappco.re/go v0.12.0/go.mod h1:xapr7fLK4/9Pu2iSCr4qZuIuatmtx1j56zS/oPDbGyQ=
+github.com/dappcore/go v0.13.0 h1:h2YjSxiLJV1A3FjoS0601Wv4m/AiwpFosw3qszl4muM=
+github.com/dappcore/go v0.13.0/go.mod h1:0wbxM1oMhcDWzFXP8iOuC90oW8/xt4mqJjElZ+cOVWI=

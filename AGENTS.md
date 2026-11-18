@@ -1,8 +1,8 @@
 # go-git Agent Notes
 
-This repository provides `dappco.re/go/git`, a Core-compatible git service and
+This repository provides `github.com/dappcore/go-git/go`, a Core-compatible git service and
 helper package. It wraps status, push, pull, and multi-repository operations in
-the `dappco.re/go` `Result` shape so callers can branch on `r.OK` and inspect
+the `github.com/dappcore/go` `Result` shape so callers can branch on `r.OK` and inspect
 per-repository errors without importing standard-library compatibility shims.
 
 Keep production code on the Core wrapper surface. Use `core.Context`,
@@ -19,7 +19,7 @@ function or method in `git.go` is tested in `git_test.go` with
 `service.go` is tested in `service_test.go` with the matching
 `TestService_<Symbol>_{Good,Bad,Ugly}` name. Examples live in
 `git_example_test.go` and `service_example_test.go`, use `Println` from
-`dappco.re/go`, and keep their output deterministic.
+`github.com/dappcore/go`, and keep their output deterministic.
 
 The tests create local temporary git repositories and bare remotes. They do not
 contact network remotes, and they configure a local test author before making

@@ -5,7 +5,7 @@ description: Multi-repository Git operations library for Go with parallel status
 
 # go-git
 
-**Module:** `dappco.re/go/git`
+**Module:** `github.com/dappcore/go-git/go`
 
 **Go version:** 1.26+
 
@@ -13,7 +13,7 @@ description: Multi-repository Git operations library for Go with parallel status
 
 ## What it does
 
-go-git is a Go library for orchestrating Git operations across multiple repositories. It was extracted from `dappco.re/go/core/scm/git/` into a standalone module.
+go-git is a Go library for orchestrating Git operations across multiple repositories. It was extracted from `github.com/dappcore/go-scm/go/git/` into a standalone module.
 
 The library provides two layers:
 
@@ -33,7 +33,7 @@ import (
     "context"
     "fmt"
 
-    git "dappco.re/go/git"
+    git "github.com/dappcore/go-git/go"
 )
 
 func main() {
@@ -64,8 +64,8 @@ package main
 import (
     "fmt"
 
-    "dappco.re/go/core"
-    git "dappco.re/go/git"
+    "github.com/dappcore/go"
+    git "github.com/dappcore/go-git/go"
 )
 
 func main() {
@@ -108,7 +108,7 @@ func main() {
 
 | Dependency | Purpose |
 |------------|---------|
-| `dappco.re/go/core` | DI container, `ServiceRuntime`, query/action bus (used only by `service.go`). |
+| `github.com/dappcore/go` | DI container, `ServiceRuntime`, query/action bus (used only by `service.go`). |
 
 The standalone layer (`git.go`) uses only the Go standard library. It shells out to the system `git` binary -- there is no embedded Git implementation.
 
