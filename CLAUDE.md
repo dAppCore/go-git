@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Multi-repository git operations library. Parallel status checks, sequential push/pull (for SSH passphrase prompts), error handling with stderr capture.
 
-**Module:** `dappco.re/go/git`
+**Module:** `github.com/dappcore/go-git/go`
 **Go:** 1.26+
 
 The Go module has been moved under `go/` and the repo root now hosts cross-language/ancillary artefacts.
@@ -15,7 +15,7 @@ The Go module has been moved under `go/` and the repo root now hosts cross-langu
 
 ```text
 core/go-git/
-├── go/                  ← Go module root (dappco.re/go/git)
+├── go/                  ← Go module root (github.com/dappcore/go-git/go)
 ├── tests/               ← non-Go-mixed helper fixtures (keep at root)
 ├── docs/                ← shared docs (symlinked from go/docs)
 ├── .woodpecker.yml
@@ -47,7 +47,7 @@ golangci-lint run ./...    # Lint (see .golangci.yml for enabled linters)
 
 Two files:
 - `go/git.go` — Core operations: Status, Push, Pull, PushMultiple. Stdlib only, no framework dependency.
-- `go/service.go` — Core framework integration via `dappco.re/go/core`. Exposes query types (QueryStatus, QueryDirtyRepos, QueryAheadRepos, QueryBehindRepos) and task types (TaskPush, TaskPull, TaskPushMultiple, TaskPullMultiple). Service uses `core.ServiceRuntime` with query and action handler registration in `OnStartup`. Also provides iterator methods (All, Dirty, Ahead, Behind) using `iter.Seq`.
+- `go/service.go` — Core framework integration via `github.com/dappcore/go`. Exposes query types (QueryStatus, QueryDirtyRepos, QueryAheadRepos, QueryBehindRepos) and task types (TaskPush, TaskPull, TaskPushMultiple, TaskPullMultiple). Service uses `core.ServiceRuntime` with query and action handler registration in `OnStartup`. Also provides iterator methods (All, Dirty, Ahead, Behind) using `iter.Seq`.
 
 ## Key Design Decisions
 

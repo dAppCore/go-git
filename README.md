@@ -16,7 +16,7 @@
 [![License: EUPL-1.2](https://img.shields.io/badge/License-EUPL--1.2-blue.svg)](https://eupl.eu/1.2/en/)
 
 
-Go module: `dappco.re/go/git`
+Go module: `github.com/dappcore/go-git/go`
 
 Agent index: [`llms.txt`](llms.txt)
 

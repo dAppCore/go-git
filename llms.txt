@@ -1,6 +1,6 @@
 # go-git
 
-Module: `dappco.re/go/git`
+Module: `github.com/dappcore/go-git/go`
 Purpose: Multi-repository Git operations library with standalone helpers and Core service integration.
 
 ## Entry Points

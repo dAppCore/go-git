@@ -4,7 +4,7 @@ import (
 	"iter"
 	"maps"
 
-	core "dappco.re/go"
+	core "github.com/dappcore/go"
 )
 
 // Queries for git service
